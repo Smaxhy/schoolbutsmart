@@ -1,6 +1,6 @@
 """Build the static site: fetch the feed, send ntfy notifications, write site/tasks.json.
 
-Run by the GitHub Actions workflow every hour; can also be run locally:
+Run by the GitHub Actions workflow every 30 minutes; can also be run locally:
 
     python build_site.py            # writes ./site, sends notifications
     python build_site.py --no-notify
@@ -8,6 +8,7 @@ Run by the GitHub Actions workflow every hour; can also be run locally:
 """
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -30,6 +31,19 @@ PUBLIC_FIELDS = ("title", "course", "due_date", "description", "days_until_due",
 def _bool_env(name, default):
     value = os.environ.get(name)
     return default if not value else value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def app_version(web_dir):
+    """Short hash of the frontend files; the page reloads itself when this changes."""
+    digest = hashlib.sha256()
+    for root, dirs, files in os.walk(web_dir):
+        dirs.sort()
+        for name in sorted(files):
+            path = os.path.join(root, name)
+            digest.update(os.path.relpath(path, web_dir).encode())
+            with open(path, "rb") as fh:
+                digest.update(fh.read())
+    return digest.hexdigest()[:12]
 
 
 def build(out_dir, web_dir, state_file, notify=True, weights_file=None):
@@ -60,12 +74,24 @@ def build(out_dir, web_dir, state_file, notify=True, weights_file=None):
     if os.path.isdir(out_dir):
         shutil.rmtree(out_dir)
     shutil.copytree(web_dir, out_dir)
+    version = app_version(web_dir)
+    index_path = os.path.join(out_dir, "index.html")
+    with open(index_path, encoding="utf-8") as fh:
+        index = fh.read()
+    with open(index_path, "w", encoding="utf-8") as fh:
+        index = index.replace('<meta name="app-version" content="dev">',
+                              f'<meta name="app-version" content="{version}">')
+        # Versioned URLs, so a phone can never combine a new page with old cached scripts.
+        for asset in ("css/style.css", "js/app.js"):
+            index = index.replace(f'"{asset}"', f'"{asset}?v={version}"')
+        fh.write(index)
     payload = {
         "tasks": [{k: t[k] for k in PUBLIC_FIELDS} for t in tasks],
         "count": len(tasks),
         "lookahead_days": lookahead,
         "thresholds": {"urgent": URGENT_DAYS, "high": HIGH_DAYS},
         "fetched_at": client.fetched_at.isoformat(),
+        "app_version": version,
     }
     with open(os.path.join(out_dir, "tasks.json"), "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
