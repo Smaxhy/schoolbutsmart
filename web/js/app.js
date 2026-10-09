@@ -2,7 +2,10 @@
   "use strict";
 
   const CACHE_KEY = "artevelde-tasks-cache-v1";
-  const FILTER_KEY = "artevelde-tasks-filter";
+  const VIEW_KEY = "artevelde-tasks-view";
+  const API_KEY_KEY = "artevelde-tasks-anthropic-key";
+  const PLAN_PREFIX = "artevelde-tasks-plan:";
+
   const WEEKDAYS = ["zo", "ma", "di", "wo", "do", "vr", "za"];
   const WEEKDAYS_LONG = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
   const MONTHS = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
@@ -13,37 +16,47 @@
     { key: "next", title: "Volgende week" },
     { key: "later", title: "Later" },
   ];
-  const IMPACT_LABEL = { high: "Zwaar", medium: "Middel", low: "Licht" };
 
-  const appEl = document.getElementById("app");
-  const statusEl = document.getElementById("status");
-  const summaryEl = document.getElementById("summary");
-  const refreshBtn = document.getElementById("refresh");
-  const detailEl = document.getElementById("detail");
-  const filterBtns = document.querySelectorAll(".filter");
+  const $ = (id) => document.getElementById(id);
+  const appEl = $("app");
+  const statusEl = $("status");
+  const updatedEl = $("updated");
+  const refreshBtn = $("refresh");
+  const detailEl = $("detail");
+  const settingsEl = $("settings-sheet");
+  const apiKeyInput = $("api-key");
+  const tabs = document.querySelectorAll(".tab");
 
   let current = null; // last rendered payload
-  let filter = "all";
+  let view = "all";
+  let planAbort = null;
 
   // ---- storage (can throw in private mode) ------------------------------
 
-  function loadCache() {
+  function storageGet(key) {
     try {
-      return JSON.parse(localStorage.getItem(CACHE_KEY));
+      return localStorage.getItem(key);
     } catch (e) {
       return null;
     }
   }
 
-  function saveCache(data) {
+  function storageSet(key, value) {
     try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+      if (value === null) localStorage.removeItem(key);
+      else localStorage.setItem(key, value);
     } catch (e) { /* ignore */ }
   }
 
-  try {
-    if (localStorage.getItem(FILTER_KEY) === "high") filter = "high";
-  } catch (e) { /* ignore */ }
+  function loadCache() {
+    try {
+      return JSON.parse(storageGet(CACHE_KEY));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  if (storageGet(VIEW_KEY) === "big") view = "big";
 
   // ---- helpers ----------------------------------------------------------
 
@@ -63,21 +76,10 @@
     return new Date(d.getFullYear(), d.getMonth(), d.getDate());
   }
 
-  function pad(n) {
-    return String(n).padStart(2, "0");
-  }
-
-  function formatTime(d) {
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-
-  function formatDue(due) {
-    return `${WEEKDAYS[due.getDay()]} ${due.getDate()} ${MONTHS[due.getMonth()]}`;
-  }
-
-  function formatDueLong(due) {
-    return `${WEEKDAYS_LONG[due.getDay()]} ${due.getDate()} ${MONTHS_LONG[due.getMonth()]} ${due.getFullYear()}`;
-  }
+  const pad = (n) => String(n).padStart(2, "0");
+  const formatTime = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const formatShort = (d) => `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  const formatLong = (d) => `${WEEKDAYS_LONG[d.getDay()]} ${d.getDate()} ${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
 
   function countdown(days) {
     if (days <= 0) return "vandaag";
@@ -100,7 +102,7 @@
     let hash = 0;
     for (const ch of name) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
     const hue = hash % 360;
-    return { background: `hsl(${hue} 45% 28%)`, color: `hsl(${hue} 80% 85%)` };
+    return { background: `hsl(${hue} 40% 26%)`, color: `hsl(${hue} 85% 84%)` };
   }
 
   function weekGroup(due, now) {
@@ -121,11 +123,15 @@
     return chip;
   }
 
-  function impactBadge(task) {
-    if (!task.impact) return null;
-    const pct = typeof task.weight === "number" ? `${task.weight}%` : "";
-    const text = task.impact === "high" ? `★ Zwaar${pct ? ` · ${pct}` : ""}` : `${IMPACT_LABEL[task.impact]}${pct ? ` · ${pct}` : ""}`;
-    return el("span", `impact ${task.impact}`, text);
+  function planKey(task) {
+    return `${PLAN_PREFIX}${task.course}|${task.title}|${task.due_date}`;
+  }
+
+  function linkOut(a, href) {
+    a.href = href;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    return a;
   }
 
   // Put http(s) links in plain text into <a> elements, without ever using innerHTML.
@@ -136,112 +142,260 @@
     while ((match = re.exec(text))) {
       const url = match[0].replace(/[.,;:!?]+$/, "");
       if (match.index > last) parent.append(text.slice(last, match.index));
-      const a = el("a", null, url);
-      a.href = url;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      parent.append(a);
+      parent.append(linkOut(el("a", null, url), url));
       last = match.index + url.length;
       re.lastIndex = last;
     }
     if (last < text.length) parent.append(text.slice(last));
   }
 
+  // Tiny, safe Markdown subset for Claude's answer: "## " headings, "- "/"1. " lists, **bold**.
+  function appendInline(parent, text) {
+    text.split(/(\*\*[^*]+\*\*)/g).forEach((part) => {
+      if (/^\*\*[^*]+\*\*$/.test(part)) parent.append(el("strong", null, part.slice(2, -2)));
+      else if (part) parent.append(part);
+    });
+  }
+
+  function renderMarkdown(container, text) {
+    container.replaceChildren();
+    let list = null;
+    for (const raw of text.split("\n")) {
+      const line = raw.trim();
+      if (!line) {
+        list = null;
+        continue;
+      }
+      const heading = line.match(/^#{1,4}\s+(.*)$/);
+      const bullet = line.match(/^[-*•]\s+(.*)$/);
+      const numbered = line.match(/^\d+[.)]\s+(.*)$/);
+      if (heading) {
+        list = null;
+        appendInline(container.appendChild(el("h4")), heading[1]);
+      } else if (bullet || numbered) {
+        const tag = bullet ? "UL" : "OL";
+        if (!list || list.tagName !== tag) list = container.appendChild(el(tag.toLowerCase()));
+        appendInline(list.appendChild(el("li")), (bullet || numbered)[1]);
+      } else {
+        list = null;
+        appendInline(container.appendChild(el("p")), line);
+      }
+    }
+  }
+
+  // ---- settings (API key) -----------------------------------------------
+
+  function openSettings() {
+    apiKeyInput.value = storageGet(API_KEY_KEY) || "";
+    settingsEl.showModal();
+    apiKeyInput.focus();
+  }
+
+  $("settings").addEventListener("click", openSettings);
+  $("settings-close").addEventListener("click", () => settingsEl.close("cancel"));
+  $("key-remove").addEventListener("click", () => {
+    storageSet(API_KEY_KEY, null);
+    apiKeyInput.value = "";
+  });
+  settingsEl.addEventListener("close", () => {
+    if (settingsEl.returnValue === "save") {
+      const key = apiKeyInput.value.trim();
+      storageSet(API_KEY_KEY, key || null);
+    }
+  });
+
+  // ---- Claude plan ------------------------------------------------------
+
+  function renderPlanBox(box, task, text, { streaming = false, error = null } = {}) {
+    box.replaceChildren();
+    const head = el("div", "ai-head");
+    head.append(el("strong", null, "✨ Plan van Claude"));
+    if (streaming) {
+      const stop = el("button", null, "Stop");
+      stop.type = "button";
+      stop.addEventListener("click", () => planAbort && planAbort.abort());
+      head.append(stop);
+    } else if (text) {
+      const again = el("button", null, "Opnieuw");
+      again.type = "button";
+      again.addEventListener("click", () => runPlan(task, box));
+      head.append(again);
+    }
+    box.append(head);
+
+    const body = el("div", "ai-body");
+    if (text) renderMarkdown(body, text);
+    else if (streaming) body.append(el("p", "thinking", "Claude denkt na"));
+    box.append(body);
+
+    if (error) box.append(el("p", "status error", error));
+    if (!streaming && text) {
+      box.append(el("p", "ai-note", "Gebruik dit als hulp om te plannen. Controleer altijd de opdracht en de regels over AI in Canvas."));
+    }
+  }
+
+  async function runPlan(task, box) {
+    const apiKey = storageGet(API_KEY_KEY);
+    if (!apiKey) {
+      openSettings();
+      return;
+    }
+    if (planAbort) planAbort.abort();
+    const controller = new AbortController();
+    planAbort = controller;
+    box.hidden = false;
+    renderPlanBox(box, task, "", { streaming: true });
+
+    let latest = "";
+    try {
+      const { streamPlan } = await import("./claude.js");
+      const now = new Date();
+      latest = await streamPlan(task, apiKey, {
+        signal: controller.signal,
+        today: `${formatLong(now)} ${formatTime(now)}`,
+        onText: (text) => {
+          latest = text;
+          if (planAbort === controller) renderPlanBox(box, task, text, { streaming: true });
+        },
+      });
+      storageSet(planKey(task), latest);
+      if (planAbort === controller) renderPlanBox(box, task, latest);
+    } catch (err) {
+      if (planAbort === controller) {
+        renderPlanBox(box, task, latest, { error: (err && err.message) || "Er ging iets mis." });
+      }
+    } finally {
+      if (planAbort === controller) planAbort = null;
+    }
+  }
+
   // ---- detail sheet -----------------------------------------------------
 
-  function openDetail(task, due, days, urgency) {
-    const inner = el("div", "detail-inner");
+  function openDetail(item) {
+    const { task, due, days, urgency } = item;
+    if (planAbort) planAbort.abort();
+    const inner = el("div", "sheet-inner");
 
-    const head = el("div", "detail-head");
-    head.append(courseChip(task.course));
+    const head = el("div", "sheet-head");
     const close = el("button", "icon-btn close", "×");
     close.type = "button";
     close.setAttribute("aria-label", "Sluiten");
     close.addEventListener("click", () => detailEl.close());
-    head.append(close);
+    head.append(courseChip(task.course), close);
 
     const title = el("h2", null, task.title);
     title.id = "detail-title";
 
-    const when = el("p", "detail-when");
-    const strong = el("strong", null, formatDueLong(due));
-    when.append(strong, ` om ${formatTime(due)}`);
+    const when = el("p", "when");
+    when.append(el("strong", null, formatLong(due)), ` om ${formatTime(due)}`);
 
-    const facts = el("div", "detail-facts");
+    const facts = el("div", "facts");
     facts.append(el("span", `fact ${urgency}`, countdown(days)));
-    if (task.impact) {
-      const pct = typeof task.weight === "number" ? ` (${task.weight}% van je eindcijfer)` : "";
-      facts.append(el("span", "fact", `${task.impact === "high" ? "★ " : ""}Gewicht: ${IMPACT_LABEL[task.impact]}${pct}`));
+    if (task.big) facts.append(el("span", "fact big", "★ Grote taak"));
+    if (typeof task.weight === "number") facts.append(el("span", "fact", `${task.weight}% van je eindcijfer`));
+
+    inner.append(head, title, when, facts);
+
+    if (task.big && task.big_reasons && task.big_reasons.length) {
+      inner.append(el("h3", null, "Waarom een grote taak"));
+      const ul = el("ul", "reasons");
+      task.big_reasons.forEach((r) => ul.append(el("li", null, r)));
+      inner.append(ul);
     }
 
-    const heading = el("h3", null, "Wat moet je doen");
-    const body = el("p", task.description ? "detail-body" : "detail-body none");
+    inner.append(el("h3", null, "Wat moet je doen"));
+    const body = el("p", task.description ? "body-text" : "body-text none");
     if (task.description) appendLinkified(body, task.description);
     else body.textContent = "Geen beschrijving in de kalender. Open de opdracht in Canvas voor de details.";
+    inner.append(body);
 
-    inner.append(head, title, when, facts, heading, body);
+    const actions = el("div", "row");
+    const planBtn = el("button", "btn claude", "✨ Plan met Claude");
+    planBtn.type = "button";
+    actions.append(planBtn);
     if (task.url && /^https?:\/\//i.test(task.url)) {
-      const link = el("a", "canvas-link", "Open in Canvas");
-      link.href = task.url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      inner.append(link);
+      actions.append(linkOut(el("a", "btn primary", "Open in Canvas"), task.url));
+    }
+    inner.append(actions);
+
+    const planBox = el("div", "ai");
+    planBox.hidden = true;
+    inner.append(planBox);
+    planBtn.addEventListener("click", () => runPlan(task, planBox));
+
+    const saved = storageGet(planKey(task));
+    if (saved) {
+      planBox.hidden = false;
+      renderPlanBox(planBox, task, saved);
     }
 
     detailEl.replaceChildren(inner);
     if (!detailEl.open) detailEl.showModal();
+    detailEl.scrollTop = 0;
   }
 
-  detailEl.addEventListener("click", (e) => {
-    if (e.target === detailEl) detailEl.close(); // click on the backdrop
+  detailEl.addEventListener("close", () => {
+    if (planAbort) planAbort.abort();
   });
+  [detailEl, settingsEl].forEach((sheet) => sheet.addEventListener("click", (e) => {
+    if (e.target === sheet) sheet.close(); // click on the backdrop
+  }));
 
-  // ---- rendering --------------------------------------------------------
+  // ---- list rendering ---------------------------------------------------
 
-  function renderCard(task, due, days, urgency) {
-    const card = el("article", `card ${urgency}`);
+  function renderCard(item) {
+    const { task, due, days, urgency } = item;
+    const card = el("article", `card ${urgency}${task.big ? " is-big" : ""}`);
     card.tabIndex = 0;
     card.setAttribute("role", "button");
-    card.setAttribute("aria-label", `${task.title}, details bekijken`);
+    card.setAttribute("aria-label", `${task.title}, ${countdown(days)}. Details bekijken`);
 
+    const date = el("div", "date-block");
+    date.append(el("span", "wd", WEEKDAYS[due.getDay()]), el("span", "day", String(due.getDate())), el("span", "mon", MONTHS[due.getMonth()]));
+
+    const bodyEl = el("div", "card-body");
     const top = el("div", "card-top");
     top.append(courseChip(task.course), el("span", "countdown", countdown(days)));
 
     const meta = el("div", "card-meta");
-    meta.append(el("span", "due", `${formatDue(due)} · ${formatTime(due)}`));
-    const badge = impactBadge(task);
-    if (badge) meta.append(badge);
+    meta.append(el("span", null, formatTime(due)));
+    if (task.big) meta.append(el("span", "badge big", "★ Groot"));
+    if (typeof task.weight === "number") meta.append(el("span", "badge weight", `${task.weight}%`));
 
-    card.append(top, el("h3", null, task.title), meta);
-    if (task.description) card.append(el("p", "desc", task.description));
+    bodyEl.append(top, el("h3", null, task.title), meta);
+    if (task.description) bodyEl.append(el("p", "desc", task.description));
+    card.append(date, bodyEl);
 
-    const open = () => openDetail(task, due, days, urgency);
-    card.addEventListener("click", open);
+    card.addEventListener("click", () => openDetail(item));
     card.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        open();
+        openDetail(item);
       }
     });
     return card;
   }
 
-  function renderEmpty(filtered) {
-    const box = el("div", "empty");
-    box.append(
-      el("span", "emoji", filtered ? "🔍" : "🎉"),
-      el("h2", null, filtered ? "Geen zware taken op komst" : "Geen taken op komst"),
-      el("p", null, filtered ? "Pas het filter aan om alle taken te zien." : "Je hebt niets te doen de komende tijd."),
-    );
-    return box;
+  function section(title, items, className) {
+    const sec = el("section");
+    const h = el("h2", `group-title${className ? ` ${className}` : ""}`, title);
+    h.append(el("span", "count", String(items.length)));
+    sec.append(h);
+    items.forEach((i) => sec.append(renderCard(i)));
+    return sec;
   }
 
-  function summarize(items, now) {
-    const week = items.filter((i) => i.group === "this");
-    const heavy = items.filter((i) => i.task.impact === "high");
-    const parts = [`${week.length} ${week.length === 1 ? "taak" : "taken"} deze week`];
-    if (heavy.length) parts.push(`${heavy.length} zwaar`);
-    return parts.join(" · ");
+  function weekSections(items) {
+    return GROUPS
+      .map((g) => ({ g, list: items.filter((i) => i.group === g.key) }))
+      .filter(({ list }) => list.length)
+      .map(({ g, list }) => section(g.title, list));
+  }
+
+  function emptyState(emoji, title, text) {
+    const box = el("div", "empty");
+    box.append(el("span", "emoji", emoji), el("h2", null, title), el("p", null, text));
+    return box;
   }
 
   function render(data) {
@@ -258,35 +412,35 @@
       })
       .filter((i) => i.due >= now && i.days <= lookahead)
       .sort((a, b) => a.due - b.due);
+    const big = all.filter((i) => i.task.big);
 
-    summaryEl.textContent = summarize(all, now);
-    const items = filter === "high" ? all.filter((i) => i.task.impact === "high") : all;
+    $("stat-urgent").textContent = all.filter((i) => i.urgency === "urgent").length;
+    $("stat-week").textContent = all.filter((i) => i.group === "this").length;
+    $("stat-big").textContent = big.length;
+    updatedEl.textContent = data.fetched_at ? `Bijgewerkt ${formatShort(wallClock(data.fetched_at))} ${formatTime(wallClock(data.fetched_at))}` : "";
 
     appEl.replaceChildren();
-    if (!items.length) {
-      appEl.append(renderEmpty(filter === "high" && all.length > 0));
+    if (view === "big") {
+      if (!big.length) {
+        appEl.append(emptyState("🌿", "Geen grote taken op komst", "Examens, projecten en zware opdrachten verschijnen hier."));
+      } else {
+        weekSections(big).forEach((s) => appEl.append(s));
+      }
       return;
     }
 
-    for (const group of GROUPS) {
-      const inGroup = items.filter((i) => i.group === group.key);
-      if (!inGroup.length) continue;
-      const section = el("section");
-      section.append(el("h2", "group-title", group.title));
-      for (const i of inGroup) section.append(renderCard(i.task, i.due, i.days, i.urgency));
-      appEl.append(section);
+    if (!all.length) {
+      appEl.append(emptyState("🎉", "Geen taken op komst", `Niets te doen in de komende ${lookahead} dagen.`));
+      return;
     }
+    if (big.length) appEl.append(section("★ Grote taken", big, "big"));
+    weekSections(all.filter((i) => !i.task.big)).forEach((s) => appEl.append(s));
   }
 
   function showStatus(message, isError) {
     statusEl.textContent = message;
     statusEl.className = isError ? "status error" : "status";
     statusEl.hidden = !message;
-  }
-
-  function formatUpdated(iso) {
-    const d = wallClock(iso);
-    return `${formatDue(d)} ${formatTime(d)}`;
   }
 
   // ---- data -------------------------------------------------------------
@@ -301,18 +455,17 @@
       const resp = await fetch(`tasks.json?t=${Date.now()}`, { cache: "no-store" });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      saveCache(data);
+      storageSet(CACHE_KEY, JSON.stringify(data));
       render(data);
       showStatus("", false);
     } catch (err) {
       const cached = loadCache();
       if (cached) {
         render(cached);
-        const when = cached.fetched_at ? ` Laatst bijgewerkt: ${formatUpdated(cached.fetched_at)}.` : "";
-        showStatus(`${navigator.onLine ? "Kon niet vernieuwen." : "Je bent offline."}${when}`, false);
+        showStatus(navigator.onLine ? "Kon niet vernieuwen; dit zijn de laatst opgehaalde taken." : "Je bent offline; dit zijn de laatst opgehaalde taken.", false);
       } else {
-        appEl.replaceChildren(el("div", "empty", "Kon taken niet laden."));
-        showStatus(navigator.onLine ? "Kon taken niet laden." : "Je bent offline en er zijn nog geen opgeslagen gegevens.", true);
+        appEl.replaceChildren(emptyState("⚠️", "Kon taken niet laden", "Controleer je verbinding en probeer opnieuw."));
+        showStatus(navigator.onLine ? "" : "Je bent offline en er zijn nog geen opgeslagen gegevens.", true);
       }
     } finally {
       loading = false;
@@ -320,41 +473,34 @@
     }
   }
 
-  // ---- filter -----------------------------------------------------------
+  // ---- tabs -------------------------------------------------------------
 
-  function syncFilterButtons() {
-    filterBtns.forEach((btn) => {
-      const active = btn.dataset.filter === filter;
-      btn.classList.toggle("active", active);
-      btn.setAttribute("aria-pressed", String(active));
-    });
+  function syncTabs() {
+    tabs.forEach((t) => t.setAttribute("aria-selected", String(t.dataset.view === view)));
   }
 
-  filterBtns.forEach((btn) => btn.addEventListener("click", () => {
-    filter = btn.dataset.filter;
-    try {
-      localStorage.setItem(FILTER_KEY, filter);
-    } catch (e) { /* ignore */ }
-    syncFilterButtons();
+  tabs.forEach((t) => t.addEventListener("click", () => {
+    view = t.dataset.view;
+    storageSet(VIEW_KEY, view);
+    syncTabs();
     if (current) render(current);
   }));
 
   // ---- pull to refresh --------------------------------------------------
 
   function setupPullToRefresh() {
-    const ptr = document.getElementById("ptr");
-    const label = document.getElementById("ptr-label");
+    const ptr = $("ptr");
+    const label = $("ptr-label");
     const THRESHOLD = 70;
     const MAX = 110;
     let startY = null;
     let pull = 0;
 
-    function setHeight(px) {
-      ptr.style.height = `${px}px`;
-    }
+    const setHeight = (px) => { ptr.style.height = `${px}px`; };
+    const sheetOpen = () => detailEl.open || settingsEl.open;
 
     document.addEventListener("touchstart", (e) => {
-      startY = window.scrollY <= 0 && e.touches.length === 1 && !detailEl.open ? e.touches[0].clientY : null;
+      startY = window.scrollY <= 0 && e.touches.length === 1 && !sheetOpen() ? e.touches[0].clientY : null;
       pull = 0;
       ptr.classList.remove("animating");
     }, { passive: true });
@@ -394,7 +540,7 @@
     if (document.visibilityState === "visible") load();
   });
   setupPullToRefresh();
-  syncFilterButtons();
+  syncTabs();
 
   const cached = loadCache();
   if (cached) render(cached);
