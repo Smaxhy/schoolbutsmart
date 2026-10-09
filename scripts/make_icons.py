@@ -10,7 +10,7 @@ import zlib
 
 BG = (31, 33, 37)
 ACCENT = (122, 162, 247)
-OUT = os.path.join(os.path.dirname(__file__), "..", "static", "icons")
+OUT = os.path.join(os.path.dirname(__file__), "..", "web", "icons")
 
 
 def dist_to_segment(px, py, ax, ay, bx, by):
