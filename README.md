@@ -4,7 +4,8 @@ A small app that runs entirely on GitHub (Actions + Pages) and reads your assign
 
 - Python script run hourly by GitHub Actions, vanilla HTML/CSS/JS frontend on GitHub Pages, installable as a PWA. No server to host or keep awake.
 - Tap a task to see the full details: what you need to do, the exact deadline, its grade weight, and an **Open in Canvas** button.
-- Mark which assignments weigh heavily on your grade in `weights.json`. They get a ★ **Zwaar** badge, and the **Zwaar gewicht** filter shows only those.
+- **Grote taken** (big tasks) get their own section and tab. They're detected automatically from the title and description (exams, projects, papers, portfolios, "telt voor 30% van het eindcijfer", ...) and from your own `weights.json`.
+- **✨ Plan met Claude**: one tap and Claude writes a study plan for an assignment: what's asked, steps with dates before the deadline, a hand-in checklist and how to start. It plans with you; it doesn't write the assignment for you.
 - Tasks grouped by week ("Deze week", "Volgende week", "Later"), colour-coded by urgency:
   - 🔴 due within 2 days (ntfy priority 5)
   - 🟠 due within 7 days (priority 4)
@@ -58,6 +59,24 @@ Things to know:
 - GitHub pauses scheduled workflows in a repo with no activity for 60 days. If notifications stop, open the Actions tab and re-enable the workflow.
 - If the feed can't be fetched, the run fails (GitHub emails you) and the previous version of the site stays online.
 
+## Big tasks
+
+A task counts as a *grote taak* when any of these hold:
+
+1. A `weights.json` rule matches with a weight ≥ `high_from` (a rule with a low weight also *removes* a task from big tasks, handy for false positives).
+2. The description mentions a percentage of the grade ≥ `high_from`, e.g. "telt voor 30% van het eindcijfer".
+3. The title contains a word like *examen, project, paper, portfolio, eindwerk, presentatie, groepswerk* (full list in `weights.py`), or the description mentions an exam, final assignment or group work.
+
+The detail view lists the reason(s) under "Waarom een grote taak".
+
+## ✨ Plan met Claude
+
+1. Create an API key at [console.anthropic.com](https://console.anthropic.com/settings/keys) (you pay per use; a plan costs a few cents).
+2. In the app tap the ⚙️ gear, paste the key, and save. It's stored **only on that device** (in the browser) and sent straight to Anthropic, never to GitHub or the public site.
+3. Open a task and tap **✨ Plan met Claude**. The plan streams in and is remembered on that device; tap **Opnieuw** for a fresh one.
+
+It uses Claude Opus 5.5 through the official Anthropic JavaScript SDK, loaded from jsDelivr the first time you use it. Check your course's rules on AI use.
+
 ## Grade weights (`weights.json`)
 
 The Canvas calendar feed doesn't contain points or grade weights, so you fill them in yourself. Edit `weights.json` on GitHub (open the file, click the pencil, commit). The site rebuilds automatically.
@@ -77,7 +96,7 @@ The Canvas calendar feed doesn't contain points or grade weights, so you fill th
 
 - `weight` is the % of your final grade (use whatever numbers the course sheet, the *ECTS-fiche*, gives).
 - A rule matches when the task title contains `title` and/or the course name contains `course`. Matching ignores upper/lower case. The **first** matching rule wins, so put specific rules above general ones.
-- Weight ≥ `high_from` shows ★ **Zwaar**, ≥ `medium_from` shows **Middel**, below that **Licht**. Tasks without a matching rule get no badge.
+- Weight ≥ `high_from` makes it a ★ **grote taak**. Every task with a known weight shows its % on the card.
 - This file is public, like the site.
 
 ## Local preview
@@ -118,9 +137,9 @@ The app then opens full-screen, and shows the last fetched tasks when you're off
 .github/workflows/update.yml   Hourly job: build, notify, deploy to Pages
 build_site.py                  Fetch feed, send notifications, write site/tasks.json
 canvas_client.py               iCal fetch/parse, course extraction, in-memory cache
-weights.py / weights.json      Grade-weight rules and matching
+weights.py / weights.json      Grade-weight rules and big-task detection
 notifier.py                    Lookahead filter, urgency tiers, ntfy notifications, sent-state tracking
-web/                           The PWA: HTML, CSS, JS, service worker, manifest, icons
+web/                           The PWA: HTML, CSS, JS (app.js, claude.js), service worker, manifest, icons
 scripts/make_icons.py          Regenerates the PWA icons
 tests/                         Unit tests
 ```

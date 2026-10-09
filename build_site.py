@@ -19,12 +19,12 @@ from dotenv import load_dotenv
 
 from canvas_client import CanvasClient, FeedError
 from notifier import HIGH_DAYS, URGENT_DAYS, Notifier, filter_upcoming
-from weights import impact_for, load_weights
+from weights import classify, load_weights
 
 log = logging.getLogger("build_site")
 
 PUBLIC_FIELDS = ("title", "course", "due_date", "description", "days_until_due", "urgency", "url",
-                 "weight", "impact")
+                 "weight", "impact", "big", "big_reasons")
 
 
 def _bool_env(name, default):
@@ -42,9 +42,9 @@ def build(out_dir, web_dir, state_file, notify=True, weights_file=None):
     client = CanvasClient(feed_url, timezone=os.environ.get("TIMEZONE") or "Europe/Brussels")
     tasks = filter_upcoming(client.get_tasks(force=True), lookahead)
 
-    weights = load_weights(weights_file) if weights_file else load_weights("")
+    weights = load_weights(weights_file or "")
     for task in tasks:
-        task["weight"], task["impact"] = impact_for(task, weights)
+        task.update(classify(task, weights))
 
     sent = 0
     if notify:

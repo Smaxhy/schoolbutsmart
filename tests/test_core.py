@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from canvas_client import CanvasClient, FeedError, split_course
 from notifier import Notifier, filter_upcoming, urgency_for
-from weights import impact_for, load_weights
+from weights import classify, impact_for, load_weights, percentage_in
 
 TZ = ZoneInfo("Europe/Brussels")
 NOW = datetime(2026, 10, 9, 10, 0, tzinfo=TZ)
@@ -183,6 +183,37 @@ class WeightTests(unittest.TestCase):
             self.assertEqual(load_weights(path)["rules"], [])
 
 
+class BigTaskTests(unittest.TestCase):
+    cfg = {"high_from": 20, "medium_from": 10, "rules": []}
+
+    def task(self, title, description="", course="Web"):
+        return {"title": title, "description": description, "course": course}
+
+    def test_percentage(self):
+        self.assertEqual(percentage_in("Deze opdracht telt voor 30% van het eindcijfer."), 30)
+        self.assertEqual(percentage_in("Gewicht: 12,5 %"), 12.5)
+        self.assertIsNone(percentage_in("Zorg dat 100% van de code getest is."))
+        self.assertIsNone(percentage_in(""))
+
+    def test_classify(self):
+        big = classify(self.task("Examen januari"), self.cfg)
+        self.assertTrue(big["big"])
+        self.assertIn("examen", big["big_reasons"][0])
+
+        by_pct = classify(self.task("Opdracht 3", "Telt mee voor 40% van je eindcijfer."), self.cfg)
+        self.assertEqual((by_pct["weight"], by_pct["impact"], by_pct["big"]), (40, "high", True))
+
+        small = classify(self.task("Quiz week 2", "Telt voor 5% van de punten."), self.cfg)
+        self.assertEqual((small["impact"], small["big"]), ("low", False))
+
+        plain = classify(self.task("Leesopdracht"), self.cfg)
+        self.assertEqual(plain, {"weight": None, "impact": None, "big": False, "big_reasons": []})
+
+    def test_rule_overrides_keywords(self):
+        cfg = dict(self.cfg, rules=[{"title": "project", "course": "", "weight": 5}])
+        self.assertFalse(classify(self.task("Projectweek reflectie"), cfg)["big"])
+
+
 class BuildTests(unittest.TestCase):
     def test_build_site(self):
         import build_site
@@ -200,6 +231,8 @@ class BuildTests(unittest.TestCase):
             self.assertEqual(data["count"], len(data["tasks"]))
             self.assertNotIn("uid", data["tasks"][0])
             self.assertEqual((data["tasks"][0]["weight"], data["tasks"][0]["impact"]), (30, "high"))
+            self.assertTrue(data["tasks"][0]["big"])
+            self.assertEqual(data["tasks"][1]["big_reasons"], ["Titel bevat 'examen'"])
             self.assertEqual(data["thresholds"], {"urgent": 2, "high": 7})
             for name in ("index.html", "sw.js", "manifest.json", "js/app.js", "icons/icon-192.png"):
                 self.assertTrue(os.path.exists(os.path.join(out, name)), name)

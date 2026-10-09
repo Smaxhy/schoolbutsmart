@@ -1,9 +1,10 @@
-const VERSION = "v3";
+const VERSION = "v4";
 const CACHE = `artevelde-tasks-${VERSION}`;
 const SHELL = [
   "./",
   "css/style.css",
   "js/app.js",
+  "js/claude.js",
   "manifest.json",
   "icons/icon-192.png",
   "icons/icon-512.png",
