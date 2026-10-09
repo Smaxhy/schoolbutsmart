@@ -167,21 +167,17 @@
 
   let loading = false;
 
-  async function load({ force = false } = {}) {
+  async function load() {
     if (loading) return;
     loading = true;
     refreshBtn.classList.add("spinning");
     try {
-      const resp = await fetch(force ? "/api/refresh" : "/api/tasks", {
-        method: force ? "POST" : "GET",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      const resp = await fetch(`tasks.json?t=${Date.now()}`, { cache: "no-store" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
       saveCache(data);
       render(data);
-      showStatus(data.stale ? "De feed is tijdelijk onbereikbaar; dit zijn de laatst bekende gegevens." : "", false);
+      showStatus("", false);
     } catch (err) {
       const cached = loadCache();
       if (cached) {
@@ -189,7 +185,7 @@
         const when = cached.fetched_at ? ` Laatst bijgewerkt: ${formatUpdated(cached.fetched_at)}.` : "";
         showStatus(`${navigator.onLine ? "Kon niet vernieuwen." : "Je bent offline."}${when}`, false);
       } else {
-        appEl.replaceChildren(el("div", "empty", err.message || "Kon taken niet laden."));
+        appEl.replaceChildren(el("div", "empty", "Kon taken niet laden."));
         showStatus(navigator.onLine ? "Kon taken niet laden." : "Je bent offline en er zijn nog geen opgeslagen gegevens.", true);
       }
     } finally {
@@ -238,7 +234,7 @@
       pull = 0;
       ptr.classList.add("animating");
       setHeight(0);
-      if (triggered) load({ force: true });
+      if (triggered) load();
     }
 
     document.addEventListener("touchend", end, { passive: true });
@@ -247,7 +243,7 @@
 
   // ---- init -------------------------------------------------------------
 
-  refreshBtn.addEventListener("click", () => load({ force: true }));
+  refreshBtn.addEventListener("click", () => load());
   window.addEventListener("online", () => load());
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") load();
@@ -260,7 +256,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("/sw.js").catch(() => { /* not fatal */ });
+      navigator.serviceWorker.register("sw.js").catch(() => { /* not fatal */ });
     });
   }
 })();

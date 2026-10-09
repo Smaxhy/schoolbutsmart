@@ -152,22 +152,28 @@ class NotifierTests(unittest.TestCase):
         self.assertEqual(silent.notify_new_tiers([self.task("z")]), 0)
 
 
-class AppTests(unittest.TestCase):
-    def test_routes(self):
-        with mock.patch.dict(os.environ, {"ICAL_FEED_URL": "https://canvas.example/f.ics", "NTFY_TOPIC": "t", "ENABLE_SCHEDULER": "false"}):
-            import app as app_module
-            flask_app = app_module.create_app()
-        flask_app.testing = True
-        flask_app.extensions["client"]._download = lambda: ICS
-        c = flask_app.test_client()
-        self.assertEqual(c.get("/").status_code, 200)
-        self.assertEqual(c.get("/healthz").status_code, 200)
-        self.assertEqual(c.get("/sw.js").mimetype, "application/javascript")
-        self.assertEqual(c.get("/static/manifest.json").status_code, 200)
-        resp = c.get("/api/tasks")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn("tasks", resp.get_json())
-        self.assertEqual(c.post("/api/refresh").status_code, 200)
+class BuildTests(unittest.TestCase):
+    def test_build_site(self):
+        import build_site
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"ICAL_FEED_URL": "https://canvas.example/f.ics", "NTFY_TOPIC": ""}), \
+                mock.patch.object(CanvasClient, "_download", lambda self: ICS):
+            out = os.path.join(tmp, "site")
+            web = os.path.join(os.path.dirname(__file__), "..", "web")
+            payload = build_site.build(out, web, os.path.join(tmp, "state.json"))
+            with open(os.path.join(out, "tasks.json"), encoding="utf-8") as fh:
+                data = json.load(fh)
+            self.assertEqual(data["count"], len(data["tasks"]))
+            self.assertNotIn("uid", data["tasks"][0])
+            self.assertEqual(data["thresholds"], {"urgent": 2, "high": 7})
+            for name in ("index.html", "sw.js", "manifest.json", "js/app.js", "icons/icon-192.png"):
+                self.assertTrue(os.path.exists(os.path.join(out, name)), name)
+
+    def test_missing_feed_url(self):
+        import build_site
+        with mock.patch.dict(os.environ, {"ICAL_FEED_URL": ""}), \
+                mock.patch("build_site.load_dotenv"):
+            self.assertEqual(build_site.main(["--out", "/nonexistent/x"]), 1)
 
 
 if __name__ == "__main__":

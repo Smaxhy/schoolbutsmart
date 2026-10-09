@@ -1,13 +1,13 @@
-const VERSION = "v1";
+const VERSION = "v2";
 const CACHE = `artevelde-tasks-${VERSION}`;
 const SHELL = [
-  "/",
-  "/static/css/style.css",
-  "/static/js/app.js",
-  "/static/manifest.json",
-  "/static/icons/icon-192.png",
-  "/static/icons/icon-512.png",
-  "/static/icons/apple-touch-icon.png",
+  "./",
+  "css/style.css",
+  "js/app.js",
+  "manifest.json",
+  "icons/icon-192.png",
+  "icons/icon-512.png",
+  "icons/apple-touch-icon.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -29,7 +29,7 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
 
   // Task data is handled by the page itself (localStorage fallback).
-  if (url.pathname.startsWith("/api/")) return;
+  if (url.pathname.endsWith("/tasks.json")) return;
 
   // Pages: network first so deploys show up, cached shell when offline.
   if (request.mode === "navigate") {
@@ -37,10 +37,10 @@ self.addEventListener("fetch", (event) => {
       fetch(request)
         .then((resp) => {
           const copy = resp.clone();
-          caches.open(CACHE).then((cache) => cache.put("/", copy));
+          caches.open(CACHE).then((cache) => cache.put("./", copy));
           return resp;
         })
-        .catch(() => caches.match("/"))
+        .catch(() => caches.match("./"))
     );
     return;
   }

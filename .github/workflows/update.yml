@@ -1,0 +1,80 @@
+name: Update tasks
+
+on:
+  schedule:
+    - cron: "7 * * * *"   # hourly
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: update-tasks
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Notification state lives on its own branch so it survives between runs.
+      - name: Restore notification state
+        uses: actions/checkout@v4
+        with:
+          ref: state
+          path: state
+        continue-on-error: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Fetch feed, send notifications, build site
+        env:
+          ICAL_FEED_URL: ${{ secrets.ICAL_FEED_URL }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          LOOKAHEAD_DAYS: ${{ vars.LOOKAHEAD_DAYS }}
+          NOTIFY_DEFAULT_TIER: ${{ vars.NOTIFY_DEFAULT_TIER }}
+          BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: python build_site.py --state state/notifications.json
+
+      - name: Save notification state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          if [ ! -d state/.git ]; then
+            git -C state init -q
+            git -C state checkout -q -b state
+          fi
+          cd state
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add notifications.json
+            git commit -q -m "Update notification state"
+            git push -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:state
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
