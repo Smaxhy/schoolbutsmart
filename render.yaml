@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: artevelde-task-tracker
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: ICAL_FEED_URL
+        sync: false
+      - key: NTFY_TOPIC
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: LOOKAHEAD_DAYS
+        value: "14"
+      - key: TIMEZONE
+        value: Europe/Brussels

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Artevelde Tasks</title>
+  <meta name="description" content="Aankomende opdrachten uit Canvas, met pushmeldingen.">
+  <meta name="theme-color" content="#1f2125">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Artevelde Tasks">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div id="ptr" class="ptr" aria-hidden="true"><span id="ptr-label">Trek om te vernieuwen</span></div>
+
+  <header class="app-header">
+    <h1>Artevelde Tasks</h1>
+    <button id="refresh" class="icon-btn" type="button" aria-label="Vernieuwen" title="Vernieuwen">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>
+      </svg>
+    </button>
+  </header>
+
+  <div id="status" class="status" role="status" hidden></div>
+
+  <main id="app" class="app">
+    <div id="loading" class="loading">Laden…</div>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
