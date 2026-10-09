@@ -2,7 +2,7 @@
 
 A small app that runs entirely on GitHub (Actions + Pages) and reads your assignments from the **Artevelde Hogeschool Canvas** calendar (iCal feed), and shows the upcoming ones in a clean, mobile-friendly dark dashboard (Dutch UI). Push notifications through [ntfy.sh](https://ntfy.sh) are optional.
 
-- Python script run hourly by GitHub Actions, vanilla HTML/CSS/JS frontend on GitHub Pages, installable as a PWA. No server to host or keep awake.
+- Python script run every 30 minutes by GitHub Actions, vanilla HTML/CSS/JS frontend on GitHub Pages, installable as a PWA. No server to host or keep awake.
 - Tap a task to see the full details: what you need to do, the exact deadline, its grade weight, and an **Open in Canvas** button.
 - **Grote taken** (big tasks) get their own section and tab. They're detected automatically from the title and description (exams, projects, papers, portfolios, "telt voor 30% van het eindcijfer", ...) and from your own `weights.json`.
 - **✨ Plan met Claude**: one tap and Claude writes a study plan for an assignment: what's asked, steps with dates before the deadline, a hand-in checklist and how to start. It plans with you; it doesn't write the assignment for you.
@@ -12,7 +12,7 @@ A small app that runs entirely on GitHub (Actions + Pages) and reads your assign
   - 🟢 everything else in the lookahead window (priority 3)
 - (Optional) each assignment triggers **one** notification every time it moves into a *higher* urgency tier, so you get at most three per assignment and no spam. Sent notifications are tracked on a `state` branch in this repo.
 - Works offline: the last fetched tasks are kept in `localStorage`.
-- Pull-to-refresh on mobile, plus a refresh button. These reload the data published by the last hourly run; they don't query Canvas live.
+- Updates itself: new Canvas data every 30 minutes, the open page checks for it every 5 minutes, and after a new version of the app is deployed the page reloads into it automatically (never while you have a task or the settings open). Pull-to-refresh and the refresh button check right away.
 
 ## Find your Canvas iCal feed URL
 
@@ -38,7 +38,7 @@ Topics on ntfy.sh have no password, so pick a long, unguessable name (e.g. `arte
 
 ## Deploy on GitHub (Actions + Pages)
 
-Everything runs from `.github/workflows/update.yml`: every hour it fetches your feed, sends any new ntfy notifications, and publishes the dashboard to GitHub Pages.
+Everything runs from `.github/workflows/update.yml`: every 30 minutes it fetches your feed, sends any new ntfy notifications, and publishes the dashboard to GitHub Pages.
 
 1. **Merge to `main`.** Scheduled workflows only run from the default branch.
 2. **Add secrets:** repo **Settings → Secrets and variables → Actions → New repository secret**
@@ -50,7 +50,7 @@ Everything runs from `.github/workflows/update.yml`: every hour it fetches your 
 
    `https://<your-github-username>.github.io/schoolbutsmart/`
 
-After that it refreshes itself every hour (GitHub's scheduler can run a few minutes late).
+After that it refreshes itself every 30 minutes (GitHub's scheduler can run a few minutes late).
 
 Things to know:
 
@@ -134,7 +134,7 @@ The app then opens full-screen, and shows the last fetched tasks when you're off
 ## Project layout
 
 ```
-.github/workflows/update.yml   Hourly job: build, notify, deploy to Pages
+.github/workflows/update.yml   Every-30-minutes job: build, notify, deploy to Pages
 build_site.py                  Fetch feed, send notifications, write site/tasks.json
 canvas_client.py               iCal fetch/parse, course extraction, in-memory cache
 weights.py / weights.json      Grade-weight rules and big-task detection

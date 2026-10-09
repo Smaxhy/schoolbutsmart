@@ -234,6 +234,9 @@ class BuildTests(unittest.TestCase):
             self.assertTrue(data["tasks"][0]["big"])
             self.assertEqual(data["tasks"][1]["big_reasons"], ["Titel bevat 'examen'"])
             self.assertEqual(data["thresholds"], {"urgent": 2, "high": 7})
+            with open(os.path.join(out, "index.html"), encoding="utf-8") as fh:
+                self.assertIn(f'<meta name="app-version" content="{data["app_version"]}">', fh.read())
+            self.assertEqual(len(data["app_version"]), 12)
             for name in ("index.html", "sw.js", "manifest.json", "js/app.js", "icons/icon-192.png"):
                 self.assertTrue(os.path.exists(os.path.join(out, name)), name)
 

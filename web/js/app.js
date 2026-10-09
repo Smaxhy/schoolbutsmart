@@ -5,6 +5,9 @@
   const VIEW_KEY = "artevelde-tasks-view";
   const API_KEY_KEY = "artevelde-tasks-anthropic-key";
   const PLAN_PREFIX = "artevelde-tasks-plan:";
+  const RELOADED_KEY = "artevelde-tasks-reloaded-for";
+  const POLL_MS = 5 * 60 * 1000;
+  const APP_VERSION = (document.querySelector('meta[name="app-version"]') || {}).content || "dev";
 
   const WEEKDAYS = ["zo", "ma", "di", "wo", "do", "vr", "za"];
   const WEEKDAYS_LONG = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
@@ -266,6 +269,7 @@
       }
     } finally {
       if (planAbort === controller) planAbort = null;
+      if (reloadPending) setTimeout(() => reloadPending && reloadSoon(), 500);
     }
   }
 
@@ -443,6 +447,46 @@
     statusEl.hidden = !message;
   }
 
+  // ---- auto-update ------------------------------------------------------
+
+  let reloadPending = false;
+  let reloadVersion = null;
+
+  function busy() {
+    return detailEl.open || settingsEl.open || planAbort !== null;
+  }
+
+  // Reload into the new version, but never in the middle of reading a task or a Claude plan.
+  function reloadSoon() {
+    if (busy()) {
+      reloadPending = true;
+      return;
+    }
+    reloadPending = false;
+    if (reloadVersion) {
+      try {
+        sessionStorage.setItem(RELOADED_KEY, reloadVersion);
+      } catch (e) { /* ignore */ }
+    }
+    window.location.reload();
+  }
+
+  [detailEl, settingsEl].forEach((sheet) => sheet.addEventListener("close", () => {
+    if (reloadPending) setTimeout(() => reloadPending && reloadSoon(), 500);
+  }));
+
+  function checkAppVersion(data) {
+    const latest = data.app_version;
+    if (!latest || APP_VERSION === "dev" || latest === APP_VERSION) return;
+    let reloadedFor = null;
+    try {
+      reloadedFor = sessionStorage.getItem(RELOADED_KEY);
+    } catch (e) { /* ignore */ }
+    if (reloadedFor === latest) return; // already tried once; a stale CDN copy must not cause a loop
+    reloadVersion = latest;
+    reloadSoon();
+  }
+
   // ---- data -------------------------------------------------------------
 
   let loading = false;
@@ -458,6 +502,7 @@
       storageSet(CACHE_KEY, JSON.stringify(data));
       render(data);
       showStatus("", false);
+      checkAppVersion(data);
     } catch (err) {
       const cached = loadCache();
       if (cached) {
@@ -541,14 +586,26 @@
   });
   setupPullToRefresh();
   syncTabs();
+  setInterval(() => {
+    if (document.visibilityState === "visible") load();
+  }, POLL_MS);
 
   const cached = loadCache();
   if (cached) render(cached);
   load();
 
   if ("serviceWorker" in navigator) {
+    // A new service worker takes over right away; reload so the page runs the new code too.
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (hadController) reloadSoon();
+    });
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("sw.js").catch(() => { /* not fatal */ });
+      navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((reg) => {
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") reg.update().catch(() => {});
+        });
+      }).catch(() => { /* not fatal */ });
     });
   }
 })();

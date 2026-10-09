@@ -1,5 +1,6 @@
-const VERSION = "v4";
-const CACHE = `artevelde-tasks-${VERSION}`;
+// Network first for everything, so a new deploy shows up on the next load;
+// the cache is only a fallback for when the phone is offline.
+const CACHE = "artevelde-tasks-v5";
 const SHELL = [
   "./",
   "css/style.css",
@@ -32,33 +33,16 @@ self.addEventListener("fetch", (event) => {
   // Task data is handled by the page itself (localStorage fallback).
   if (url.pathname.endsWith("/tasks.json")) return;
 
-  // Pages: network first so deploys show up, cached shell when offline.
-  if (request.mode === "navigate") {
-    event.respondWith(
-      fetch(request)
-        .then((resp) => {
-          const copy = resp.clone();
-          caches.open(CACHE).then((cache) => cache.put("./", copy));
-          return resp;
-        })
-        .catch(() => caches.match("./"))
-    );
-    return;
-  }
-
-  // Static assets: serve from cache, refresh in the background.
+  const key = request.mode === "navigate" ? "./" : request;
   event.respondWith(
-    caches.match(request).then((cached) => {
-      const network = fetch(request)
-        .then((resp) => {
-          if (resp.ok) {
-            const copy = resp.clone();
-            caches.open(CACHE).then((cache) => cache.put(request, copy));
-          }
-          return resp;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    fetch(request, { cache: "no-cache" })
+      .then((resp) => {
+        if (resp.ok) {
+          const copy = resp.clone();
+          caches.open(CACHE).then((cache) => cache.put(key, copy));
+        }
+        return resp;
+      })
+      .catch(() => caches.match(key).then((cached) => cached || Response.error()))
   );
 });

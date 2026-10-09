@@ -2,7 +2,7 @@ name: Update tasks
 
 on:
   schedule:
-    - cron: "7 * * * *"   # hourly
+    - cron: "7,37 * * * *"   # every 30 minutes
   workflow_dispatch:
   push:
     branches: [main]
