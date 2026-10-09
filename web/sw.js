@@ -1,6 +1,6 @@
 // Network first for everything, so a new deploy shows up on the next load;
 // the cache is only a fallback for when the phone is offline.
-const CACHE = "artevelde-tasks-v5";
+const CACHE = "artevelde-tasks-v6";
 const SHELL = [
   "./",
   "css/style.css",
@@ -13,7 +13,9 @@ const SHELL = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: "reload" skips the browser's HTTP cache, so we never store an outdated copy.
+  const requests = SHELL.map((url) => new Request(url, { cache: "reload" }));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(requests)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
@@ -43,6 +45,6 @@ self.addEventListener("fetch", (event) => {
         }
         return resp;
       })
-      .catch(() => caches.match(key).then((cached) => cached || Response.error()))
+      .catch(() => caches.match(key, { ignoreSearch: true }).then((cached) => cached || Response.error()))
   );
 });

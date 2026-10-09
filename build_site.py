@@ -79,8 +79,12 @@ def build(out_dir, web_dir, state_file, notify=True, weights_file=None):
     with open(index_path, encoding="utf-8") as fh:
         index = fh.read()
     with open(index_path, "w", encoding="utf-8") as fh:
-        fh.write(index.replace('<meta name="app-version" content="dev">',
-                               f'<meta name="app-version" content="{version}">'))
+        index = index.replace('<meta name="app-version" content="dev">',
+                              f'<meta name="app-version" content="{version}">')
+        # Versioned URLs, so a phone can never combine a new page with old cached scripts.
+        for asset in ("css/style.css", "js/app.js"):
+            index = index.replace(f'"{asset}"', f'"{asset}?v={version}"')
+        fh.write(index)
     payload = {
         "tasks": [{k: t[k] for k in PUBLIC_FIELDS} for t in tasks],
         "count": len(tasks),

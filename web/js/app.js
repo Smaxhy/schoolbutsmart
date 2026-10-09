@@ -251,7 +251,7 @@
 
     let latest = "";
     try {
-      const { streamPlan } = await import("./claude.js");
+      const { streamPlan } = await import(`./claude.js?v=${APP_VERSION}`);
       const now = new Date();
       latest = await streamPlan(task, apiKey, {
         signal: controller.signal,
@@ -441,6 +441,16 @@
     weekSections(all.filter((i) => !i.task.big)).forEach((s) => appEl.append(s));
   }
 
+  // A rendering bug must never leave the page stuck on "Laden…".
+  function safeRender(data) {
+    try {
+      render(data);
+    } catch (err) {
+      console.error(err);
+      appEl.replaceChildren(emptyState("⚠️", "Er ging iets mis bij het tonen van je taken", "Tik op vernieuwen of herlaad de pagina."));
+    }
+  }
+
   function showStatus(message, isError) {
     statusEl.textContent = message;
     statusEl.className = isError ? "status error" : "status";
@@ -500,13 +510,13 @@
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       storageSet(CACHE_KEY, JSON.stringify(data));
-      render(data);
-      showStatus("", false);
       checkAppVersion(data);
+      safeRender(data);
+      showStatus("", false);
     } catch (err) {
       const cached = loadCache();
       if (cached) {
-        render(cached);
+        safeRender(cached);
         showStatus(navigator.onLine ? "Kon niet vernieuwen; dit zijn de laatst opgehaalde taken." : "Je bent offline; dit zijn de laatst opgehaalde taken.", false);
       } else {
         appEl.replaceChildren(emptyState("⚠️", "Kon taken niet laden", "Controleer je verbinding en probeer opnieuw."));
@@ -591,7 +601,7 @@
   }, POLL_MS);
 
   const cached = loadCache();
-  if (cached) render(cached);
+  if (cached) safeRender(cached);
   load();
 
   if ("serviceWorker" in navigator) {

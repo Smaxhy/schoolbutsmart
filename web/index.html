@@ -78,5 +78,41 @@
   </dialog>
 
   <script src="js/app.js"></script>
+  <script>
+    // Safety net: if the app hasn't shown anything after 10 seconds (for example because the phone
+    // kept an outdated copy of the scripts), clear the saved files and reload once by itself.
+    // Your tasks, settings and API key are kept.
+    (function () {
+      var KEY = "artevelde-tasks-repaired";
+      function repair() {
+        try { sessionStorage.setItem(KEY, "1"); } catch (e) {}
+        var jobs = [];
+        if ("serviceWorker" in navigator) {
+          jobs.push(navigator.serviceWorker.getRegistrations().then(function (regs) {
+            return Promise.all(regs.map(function (r) { return r.unregister(); }));
+          }));
+        }
+        if (window.caches) {
+          jobs.push(caches.keys().then(function (keys) {
+            return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+          }));
+        }
+        Promise.all(jobs).catch(function () {}).then(function () {
+          location.replace(location.pathname + "?r=" + Date.now());
+        });
+      }
+      setTimeout(function () {
+        var app = document.getElementById("app");
+        if (!app || !app.querySelector(".loading")) return;
+        var tried = false;
+        try { tried = sessionStorage.getItem(KEY) === "1"; } catch (e) {}
+        if (!tried) return repair();
+        app.innerHTML = '<div class="empty"><span class="emoji">🔧</span><h2>De app laadt niet goed</h2>' +
+          '<p>Tik hieronder om opgeslagen bestanden te wissen en opnieuw te laden.</p>' +
+          '<p><button id="repair" class="btn primary" type="button">Herstel en herlaad</button></p></div>';
+        document.getElementById("repair").onclick = repair;
+      }, 10000);
+    })();
+  </script>
 </body>
 </html>
