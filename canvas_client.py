@@ -16,7 +16,7 @@ from notifier import urgency_for
 log = logging.getLogger(__name__)
 
 DEFAULT_COURSE = "Overig"
-DESCRIPTION_LIMIT = 600
+DESCRIPTION_LIMIT = 4000
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _BR_RE = re.compile(r"<\s*(br|/p|/div|/li)\s*/?>", re.I)

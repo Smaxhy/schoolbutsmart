@@ -1,13 +1,15 @@
 # artevelde-task-tracker
 
-A small app that runs entirely on GitHub (Actions + Pages) and reads your assignments from the **Artevelde Hogeschool Canvas** calendar (iCal feed), shows the upcoming ones in a mobile-friendly dark dashboard (Dutch UI), and sends **push notifications to your phone** through [ntfy.sh](https://ntfy.sh).
+A small app that runs entirely on GitHub (Actions + Pages) and reads your assignments from the **Artevelde Hogeschool Canvas** calendar (iCal feed), and shows the upcoming ones in a clean, mobile-friendly dark dashboard (Dutch UI). Push notifications through [ntfy.sh](https://ntfy.sh) are optional.
 
 - Python script run hourly by GitHub Actions, vanilla HTML/CSS/JS frontend on GitHub Pages, installable as a PWA. No server to host or keep awake.
+- Tap a task to see the full details: what you need to do, the exact deadline, its grade weight, and an **Open in Canvas** button.
+- Mark which assignments weigh heavily on your grade in `weights.json`. They get a ★ **Zwaar** badge, and the **Zwaar gewicht** filter shows only those.
 - Tasks grouped by week ("Deze week", "Volgende week", "Later"), colour-coded by urgency:
   - 🔴 due within 2 days (ntfy priority 5)
   - 🟠 due within 7 days (priority 4)
   - 🟢 everything else in the lookahead window (priority 3)
-- Each assignment triggers **one** notification every time it moves into a *higher* urgency tier, so you get at most three per assignment and no spam. Sent notifications are tracked on a `state` branch in this repo.
+- (Optional) each assignment triggers **one** notification every time it moves into a *higher* urgency tier, so you get at most three per assignment and no spam. Sent notifications are tracked on a `state` branch in this repo.
 - Works offline: the last fetched tasks are kept in `localStorage`.
 - Pull-to-refresh on mobile, plus a refresh button. These reload the data published by the last hourly run; they don't query Canvas live.
 
@@ -20,7 +22,10 @@ A small app that runs entirely on GitHub (Actions + Pages) and reads your assign
 
 > Treat this URL like a password: anyone who has it can read your calendar. Never commit it (`.env` is git-ignored).
 
-## Install ntfy on your phone
+## (Optional) install ntfy on your phone
+
+Skip this if you don't want push notifications; just leave `NTFY_TOPIC` unset.
+
 
 1. Install the **ntfy** app:
    - Android: [Google Play](https://play.google.com/store/apps/details?id=io.heckel.ntfy) or [F-Droid](https://f-droid.org/packages/io.heckel.ntfy/)
@@ -37,7 +42,7 @@ Everything runs from `.github/workflows/update.yml`: every hour it fetches your 
 1. **Merge to `main`.** Scheduled workflows only run from the default branch.
 2. **Add secrets:** repo **Settings → Secrets and variables → Actions → New repository secret**
    - `ICAL_FEED_URL`: your Canvas feed URL
-   - `NTFY_TOPIC`: your ntfy topic
+   - `NTFY_TOPIC` (optional): your ntfy topic
 3. **(Optional) add variables** on the same page, under the *Variables* tab: `LOOKAHEAD_DAYS` (default `14`) and `NOTIFY_DEFAULT_TIER` (`false` to skip notifications for green tasks).
 4. **Enable Pages:** **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 5. **Run it once:** **Actions → Update tasks → Run workflow**. When it's green, your dashboard is at
@@ -49,9 +54,31 @@ After that it refreshes itself every hour (GitHub's scheduler can run a few minu
 Things to know:
 
 - **The site is public.** Anyone who has the link can read your task list. The feed URL itself stays in secrets and is never published.
-- The first run notifies about everything currently in the window, so expect a burst. Set `NOTIFY_DEFAULT_TIER=false` if you only want orange/red alerts.
+- If you use ntfy: the first run notifies about everything currently in the window, so expect a burst. Set `NOTIFY_DEFAULT_TIER=false` if you only want orange/red alerts.
 - GitHub pauses scheduled workflows in a repo with no activity for 60 days. If notifications stop, open the Actions tab and re-enable the workflow.
 - If the feed can't be fetched, the run fails (GitHub emails you) and the previous version of the site stays online.
+
+## Grade weights (`weights.json`)
+
+The Canvas calendar feed doesn't contain points or grade weights, so you fill them in yourself. Edit `weights.json` on GitHub (open the file, click the pencil, commit). The site rebuilds automatically.
+
+```json
+{
+  "high_from": 20,
+  "medium_from": 10,
+  "rules": [
+    { "course": "Databases", "title": "examen", "weight": 40 },
+    { "title": "eindwerk", "weight": 30 },
+    { "course": "Webontwikkeling", "title": "verslag", "weight": 15 },
+    { "course": "Netwerken", "weight": 5 }
+  ]
+}
+```
+
+- `weight` is the % of your final grade (use whatever numbers the course sheet, the *ECTS-fiche*, gives).
+- A rule matches when the task title contains `title` and/or the course name contains `course`. Matching ignores upper/lower case. The **first** matching rule wins, so put specific rules above general ones.
+- Weight ≥ `high_from` shows ★ **Zwaar**, ≥ `medium_from` shows **Middel**, below that **Licht**. Tasks without a matching rule get no badge.
+- This file is public, like the site.
 
 ## Local preview
 
@@ -72,7 +99,7 @@ Run the tests with `python -m unittest discover -s tests -t .`.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `ICAL_FEED_URL` | – (required) | Canvas calendar feed URL |
-| `NTFY_TOPIC` | – | ntfy topic; notifications are skipped if empty |
+| `NTFY_TOPIC` | – | ntfy topic (optional); notifications are skipped if empty |
 | `LOOKAHEAD_DAYS` | `14` | How many days ahead to show and notify |
 | `TIMEZONE` | `Europe/Brussels` | Timezone for due dates |
 | `NOTIFY_DEFAULT_TIER` | `true` | Also notify for green (>7 days) tasks |
@@ -91,6 +118,7 @@ The app then opens full-screen, and shows the last fetched tasks when you're off
 .github/workflows/update.yml   Hourly job: build, notify, deploy to Pages
 build_site.py                  Fetch feed, send notifications, write site/tasks.json
 canvas_client.py               iCal fetch/parse, course extraction, in-memory cache
+weights.py / weights.json      Grade-weight rules and matching
 notifier.py                    Lookahead filter, urgency tiers, ntfy notifications, sent-state tracking
 web/                           The PWA: HTML, CSS, JS, service worker, manifest, icons
 scripts/make_icons.py          Regenerates the PWA icons

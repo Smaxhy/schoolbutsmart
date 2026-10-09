@@ -1,0 +1,6 @@
+{
+  "_help": "weight = % of your final grade. A rule matches when the assignment title contains 'title' and/or the course name contains 'course' (not case sensitive). First match wins. Example rule: {\"course\": \"Databases\", \"title\": \"examen\", \"weight\": 40}. Weight >= high_from shows 'Zwaar', >= medium_from shows 'Middel'.",
+  "high_from": 20,
+  "medium_from": 10,
+  "rules": []
+}

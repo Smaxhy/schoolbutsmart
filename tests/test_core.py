@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from canvas_client import CanvasClient, FeedError, split_course
 from notifier import Notifier, filter_upcoming, urgency_for
+from weights import impact_for, load_weights
 
 TZ = ZoneInfo("Europe/Brussels")
 NOW = datetime(2026, 10, 9, 10, 0, tzinfo=TZ)
@@ -152,6 +153,36 @@ class NotifierTests(unittest.TestCase):
         self.assertEqual(silent.notify_new_tiers([self.task("z")]), 0)
 
 
+class WeightTests(unittest.TestCase):
+    def config(self, rules, **extra):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "w.json")
+            with open(path, "w") as fh:
+                json.dump({"rules": rules, **extra}, fh)
+            return load_weights(path)
+
+    def test_matching_and_tiers(self):
+        cfg = self.config([
+            {"course": "Databases", "title": "examen", "weight": 40},
+            {"title": "verslag", "weight": 15},
+            {"course": "web", "weight": 5},
+            {"weight": 99},  # no title/course: ignored
+        ])
+        self.assertEqual(len(cfg["rules"]), 3)
+        t = lambda title, course: {"title": title, "course": course}
+        self.assertEqual(impact_for(t("Examen januari", "Databases"), cfg), (40, "high"))
+        self.assertEqual(impact_for(t("Examen januari", "Netwerken"), cfg), (None, None))
+        self.assertEqual(impact_for(t("Verslag stage", "X"), cfg), (15, "medium"))
+        self.assertEqual(impact_for(t("Quiz", "Webontwikkeling 2"), cfg), (5, "low"))
+
+    def test_missing_or_broken_file(self):
+        self.assertEqual(load_weights("/nonexistent.json")["rules"], [])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "w.json")
+            open(path, "w").write("{nope")
+            self.assertEqual(load_weights(path)["rules"], [])
+
+
 class BuildTests(unittest.TestCase):
     def test_build_site(self):
         import build_site
@@ -160,11 +191,15 @@ class BuildTests(unittest.TestCase):
                 mock.patch.object(CanvasClient, "_download", lambda self: ICS):
             out = os.path.join(tmp, "site")
             web = os.path.join(os.path.dirname(__file__), "..", "web")
-            payload = build_site.build(out, web, os.path.join(tmp, "state.json"))
+            wfile = os.path.join(tmp, "w.json")
+            with open(wfile, "w") as fh:
+                json.dump({"rules": [{"title": "verslag", "weight": 30}]}, fh)
+            payload = build_site.build(out, web, os.path.join(tmp, "state.json"), weights_file=wfile)
             with open(os.path.join(out, "tasks.json"), encoding="utf-8") as fh:
                 data = json.load(fh)
             self.assertEqual(data["count"], len(data["tasks"]))
             self.assertNotIn("uid", data["tasks"][0])
+            self.assertEqual((data["tasks"][0]["weight"], data["tasks"][0]["impact"]), (30, "high"))
             self.assertEqual(data["thresholds"], {"urgent": 2, "high": 7})
             for name in ("index.html", "sw.js", "manifest.json", "js/app.js", "icons/icon-192.png"):
                 self.assertTrue(os.path.exists(os.path.join(out, name)), name)

@@ -29,9 +29,19 @@
 
   <div id="status" class="status" role="status" hidden></div>
 
+  <div class="toolbar">
+    <p id="summary" class="summary"></p>
+    <div class="filters" role="group" aria-label="Filter">
+      <button type="button" class="filter active" data-filter="all" aria-pressed="true">Alles</button>
+      <button type="button" class="filter" data-filter="high" aria-pressed="false">Zwaar gewicht</button>
+    </div>
+  </div>
+
   <main id="app" class="app">
     <div id="loading" class="loading">Laden…</div>
   </main>
+
+  <dialog id="detail" class="detail" aria-labelledby="detail-title"></dialog>
 
   <script src="js/app.js"></script>
 </body>
