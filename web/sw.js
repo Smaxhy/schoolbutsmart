@@ -1,4 +1,4 @@
-const VERSION = "v2";
+const VERSION = "v3";
 const CACHE = `artevelde-tasks-${VERSION}`;
 const SHELL = [
   "./",

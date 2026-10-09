@@ -19,10 +19,12 @@ from dotenv import load_dotenv
 
 from canvas_client import CanvasClient, FeedError
 from notifier import HIGH_DAYS, URGENT_DAYS, Notifier, filter_upcoming
+from weights import impact_for, load_weights
 
 log = logging.getLogger("build_site")
 
-PUBLIC_FIELDS = ("title", "course", "due_date", "description", "days_until_due", "urgency", "url")
+PUBLIC_FIELDS = ("title", "course", "due_date", "description", "days_until_due", "urgency", "url",
+                 "weight", "impact")
 
 
 def _bool_env(name, default):
@@ -30,7 +32,7 @@ def _bool_env(name, default):
     return default if not value else value.strip().lower() in ("1", "true", "yes", "on")
 
 
-def build(out_dir, web_dir, state_file, notify=True):
+def build(out_dir, web_dir, state_file, notify=True, weights_file=None):
     load_dotenv()
     feed_url = os.environ.get("ICAL_FEED_URL", "").strip()
     if not feed_url:
@@ -39,6 +41,10 @@ def build(out_dir, web_dir, state_file, notify=True):
 
     client = CanvasClient(feed_url, timezone=os.environ.get("TIMEZONE") or "Europe/Brussels")
     tasks = filter_upcoming(client.get_tasks(force=True), lookahead)
+
+    weights = load_weights(weights_file) if weights_file else load_weights("")
+    for task in tasks:
+        task["weight"], task["impact"] = impact_for(task, weights)
 
     sent = 0
     if notify:
@@ -73,12 +79,13 @@ def main(argv=None):
     parser.add_argument("--out", default=os.path.join(here, "site"))
     parser.add_argument("--web", default=os.path.join(here, "web"))
     parser.add_argument("--state", default=os.path.join(here, "data", "notifications.json"))
+    parser.add_argument("--weights", default=os.path.join(here, "weights.json"))
     parser.add_argument("--no-notify", action="store_true")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     try:
-        build(args.out, args.web, args.state, notify=not args.no_notify)
+        build(args.out, args.web, args.state, notify=not args.no_notify, weights_file=args.weights)
     except FeedError as exc:
         log.error("%s", exc)
         return 1
