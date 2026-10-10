@@ -45,6 +45,19 @@ END:VCALENDAR
 """
 
 
+def shifted_ics():
+    """ICS with every date moved so that NOW lies at today's date (for code that uses the real clock)."""
+    import re
+    from datetime import date, timedelta
+    shift = date.today() - NOW.date()
+
+    def move(m):
+        d = datetime.strptime(m.group(2), "%Y%m%d").date() + shift
+        return m.group(1) + d.strftime("%Y%m%d")
+    return re.sub(rb"(DT(?:START|END)[^:]*:)(\d{8})", lambda m: move(
+        type("M", (), {"group": lambda self, i: m.group(i).decode()})()).encode(), ICS)
+
+
 def make_client():
     client = CanvasClient("webcal://canvas.example/feed.ics")
     client._download = lambda: ICS
@@ -219,7 +232,7 @@ class BuildTests(unittest.TestCase):
         import build_site
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch.dict(os.environ, {"ICAL_FEED_URL": "https://canvas.example/f.ics", "NTFY_TOPIC": ""}), \
-                mock.patch.object(CanvasClient, "_download", lambda self: ICS):
+                mock.patch.object(CanvasClient, "_download", lambda self: shifted_ics()):
             out = os.path.join(tmp, "site")
             web = os.path.join(os.path.dirname(__file__), "..", "web")
             wfile = os.path.join(tmp, "w.json")
