@@ -23,8 +23,44 @@ _BR_RE = re.compile(r"<\s*(br|/p|/div|/li)\s*/?>", re.I)
 _WS_RE = re.compile(r"[ \t\r\f\v]+")
 _PREFIX_RE = re.compile(r"^\s*\[([^\]]+)\]\s*(.+)$")
 _SUFFIX_RE = re.compile(r"^(.+?)\s*\[([^\]]+)\]\s*$")
+# Canvas writes UID "event-<type>-<id>" (assignment, calendar-event, sub-assignment,
+# assignment-override) and URL ".../calendar?include_contexts=<context>_<id>&...#<type>_<id>",
+# where <context> is the calendar the item belongs to (course, group, user = personal,
+# account = school-wide calendar). Canvas colours items per calendar, so this is what
+# tells the "yellow" items apart. See canvas-lms app/models/calendar_event.rb (IcalEvent).
+_UID_RE = re.compile(r"^event-([a-z-]+?)-(\d+)$")
+_CONTEXT_RE = re.compile(r"[?&]include_contexts=([a-z_]+?)_(\d+)")
+_URL_HOST_RE = re.compile(r"^(https?://[^/]+)/")
+_ANCHOR_ID_RE = re.compile(r"#(?:assignment|sub_assignment)_(\d+)$")
+CALENDAR_TYPE_NAMES = {"user": "Persoonlijke agenda", "account": "Schoolagenda", "group": "Groepsagenda",
+                       "appointment_group": "Afspraken"}
+
 _DESC_COURSE_RE = re.compile(r"^\s*(?:course|cursus|vak|opleidingsonderdeel)\s*:\s*(.+?)\s*$",
                              re.I | re.M)
+
+
+def canvas_meta(uid, url, course):
+    """Work out item kind, calendar and a direct link from Canvas' UID and URL."""
+    match = _UID_RE.match(uid or "")
+    raw_kind = match.group(1) if match else ""
+    kind = "event" if raw_kind == "calendar-event" else ("assignment" if "assignment" in raw_kind else "other")
+
+    ctx = _CONTEXT_RE.search(url or "")
+    calendar_type = ctx.group(1) if ctx else ""
+    calendar = f"{ctx.group(1)}_{ctx.group(2)}" if ctx else ""
+    if calendar_type == "course":
+        calendar_name = course
+    else:
+        calendar_name = CALENDAR_TYPE_NAMES.get(calendar_type, course or "Overig")
+
+    # Link straight to the assignment instead of the calendar month view, when we can.
+    link = url or ""
+    host = _URL_HOST_RE.match(url or "")
+    anchor = _ANCHOR_ID_RE.search(url or "")
+    if host and anchor and calendar_type == "course":
+        link = f"{host.group(1)}/courses/{ctx.group(2)}/assignments/{anchor.group(1)}"
+    return {"kind": kind, "calendar": calendar, "calendar_type": calendar_type,
+            "calendar_name": calendar_name, "link": link}
 
 
 class FeedError(Exception):
@@ -120,13 +156,18 @@ class CanvasClient:
                 description = clean_text(component.get("description", ""))
                 location = clean_text(component.get("location", ""))
                 course, title = split_course(summary, description, location)
+                uid = str(component.get("uid") or f"{summary}|{start}")
+                url = str(component.get("url") or "")
+                end = component.decoded("dtend", None)
                 events.append({
-                    "uid": str(component.get("uid") or f"{summary}|{start}"),
+                    "uid": uid,
                     "title": title,
                     "course": course,
                     "due": self._to_local(start),
+                    "end": self._to_local(end) if end is not None else None,
                     "description": description,
-                    "url": str(component.get("url") or ""),
+                    "url": url,
+                    **canvas_meta(uid, url, course),
                 })
             except (ValueError, TypeError, KeyError):
                 log.warning("Skipping unparsable calendar event")
@@ -188,6 +229,13 @@ class CanvasClient:
                 "description": description,
                 "days_until_due": days,
                 "urgency": urgency_for(days),
-                "url": event["url"],
+                "url": event["link"],
+                "kind": event["kind"],
+                "calendar": event["calendar"],
+                "calendar_type": event["calendar_type"],
+                "calendar_name": event["calendar_name"],
+                "all_day": event["end"] is None and event["due"].strftime("%H:%M") == "23:59",
+                "duration_minutes": (int((event["end"] - event["due"]).total_seconds() // 60)
+                                     if event["end"] is not None else 0),
             })
         return tasks

@@ -25,7 +25,35 @@ from weights import classify, load_weights
 log = logging.getLogger("build_site")
 
 PUBLIC_FIELDS = ("title", "course", "due_date", "description", "days_until_due", "urgency", "url",
-                 "weight", "impact", "big", "big_reasons")
+                 "weight", "impact", "big", "big_reasons", "kind", "calendar", "calendar_type",
+                 "calendar_name", "all_day", "duration_minutes")
+
+
+def calendar_summary(tasks):
+    """Per Canvas calendar (= one colour in Canvas): how many upcoming items, of which kinds."""
+    calendars = {}
+    for t in tasks:
+        key = t["calendar"] or f"onbekend:{t['course']}"
+        cal = calendars.setdefault(key, {"id": t["calendar"], "type": t["calendar_type"],
+                                         "name": t["calendar_name"], "count": 0,
+                                         "kinds": {}, "examples": []})
+        cal["count"] += 1
+        cal["kinds"][t["kind"]] = cal["kinds"].get(t["kind"], 0) + 1
+        if len(cal["examples"]) < 4:
+            cal["examples"].append(t["title"])
+    return sorted(calendars.values(), key=lambda c: (-c["count"], c["name"]))
+
+
+def log_report(all_tasks, window_tasks):
+    """Readable overview in the Actions log, to see how the feed is structured."""
+    log.info("Calendar report: %d upcoming items in the feed, %d in the window", len(all_tasks), len(window_tasks))
+    for cal in calendar_summary(all_tasks):
+        log.info("  %-22s %-28s %3d items  %s  e.g. %s", cal["id"] or "-", cal["name"][:28], cal["count"],
+                 cal["kinds"], " | ".join(cal["examples"]))
+    for t in window_tasks:
+        log.info("  task: %s | %s | %s | %s | %s min | big=%s %s", t["due_date"][:16], t["calendar"] or "-",
+                 t["kind"], t["title"][:60], t["duration_minutes"], t["big"],
+                 "; ".join(r["text"] if isinstance(r, dict) else r for r in t["big_reasons"]))
 
 
 def _bool_env(name, default):
@@ -54,11 +82,14 @@ def build(out_dir, web_dir, state_file, notify=True, weights_file=None):
     lookahead = int(os.environ.get("LOOKAHEAD_DAYS") or 14)
 
     client = CanvasClient(feed_url, timezone=os.environ.get("TIMEZONE") or "Europe/Brussels")
-    tasks = filter_upcoming(client.get_tasks(force=True), lookahead)
+    all_tasks = client.get_tasks(force=True)
+    tasks = filter_upcoming(all_tasks, lookahead)
 
     weights = load_weights(weights_file or "")
     for task in tasks:
         task.update(classify(task, weights))
+
+    log_report(all_tasks, tasks)
 
     sent = 0
     if notify:
@@ -92,6 +123,8 @@ def build(out_dir, web_dir, state_file, notify=True, weights_file=None):
         "thresholds": {"urgent": URGENT_DAYS, "high": HIGH_DAYS},
         "fetched_at": client.fetched_at.isoformat(),
         "app_version": version,
+        "calendars": [{k: c[k] for k in ("id", "type", "name", "count", "examples")}
+                      for c in calendar_summary(all_tasks)],
     }
     with open(os.path.join(out_dir, "tasks.json"), "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
