@@ -41,12 +41,15 @@ jobs:
         env:
           ICAL_FEED_URL: ${{ secrets.ICAL_FEED_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          CANVAS_TOKEN: ${{ secrets.CANVAS_TOKEN }}
           LOOKAHEAD_DAYS: ${{ vars.LOOKAHEAD_DAYS }}
           NOTIFY_DEFAULT_TIER: ${{ vars.NOTIFY_DEFAULT_TIER }}
           BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
-        run: python build_site.py --state state/notifications.json
+        # Test runs on other branches only build; notifications and publishing stay on main.
+        run: python build_site.py --state state/notifications.json ${{ github.ref != 'refs/heads/main' && '--no-notify' || '' }}
 
       - name: Save notification state
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -71,6 +74,8 @@ jobs:
 
   deploy:
     needs: build
+    # Only main may publish (GitHub Pages' environment rule); runs on other branches just build.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

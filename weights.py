@@ -63,17 +63,23 @@ def impact_for(task, config):
 
 
 # ---- big-task detection ---------------------------------------------------
-# The feed has no weights, so besides weights.json we look for tell-tale words
-# and "x% van het eindcijfer"-style phrases in the title and description.
+# Signals, strongest first:
+#   1. a weights.json rule (also the way to say "this is NOT big": give it a low weight)
+#   2. the task's Canvas calendar is one of your yellow ones (Canvas colours per course)
+#   3. the description states a grade percentage >= high_from ("telt voor 30%")
+#   4. the title names an evaluation moment (examen, tussentijdse opdracht, eindwerk, ...)
+# Words in descriptions are NOT used: course templates mention "examen" in every task,
+# which made weekly exercises look big.
 
 BIG_TITLE_WORDS = (
-    "examen", "tentamen", "eindwerk", "eindopdracht", "eindproject", "eindpresentatie",
-    "eindevaluatie", "bachelorproef", "portfolio", "project", "paper", "essay",
-    "onderzoek", "presentatie", "verdediging", "stageverslag", "groepswerk", "groepsopdracht",
+    "examen", "tentamen", "tussentijds", "eindopdracht", "eindwerk", "eindproject",
+    "eindpresentatie", "eindevaluatie", "eindproduct", "bachelorproef", "portfolio", "jury",
+    "evaluatiemoment", "proefexamen",
 )
-BIG_DESCRIPTION_WORDS = (
-    "examen", "tentamen", "eindwerk", "eindopdracht", "eindproject", "bachelorproef",
-    "portfolio", "groepswerk", "groepsopdracht",
+# Weekly / small work; a title like this is never "big" on its title alone.
+SMALL_TITLE_WORDS = (
+    "lesopdracht", "lesweek", "journal", "@home", "oefening", "huiswerk", "voorbereiding",
+    "quiz", "reflectie", "logboek",
 )
 _GRADE_WORDS = r"(?:eindcijfer|eindscore|eindresultaat|cijfer|punten|score|gewicht|weegt|telt|quotering|beoordeling)"
 _PCT = r"(\d{1,3}(?:[.,]\d+)?)\s*%"
@@ -102,33 +108,32 @@ def percentage_in(text):
     return best
 
 
-def classify(task, config):
-    """Return {"weight", "impact", "big", "big_reasons"} for a task.
+def classify(task, config, yellow_calendars=()):
+    """Return {"weight", "impact", "big", "big_rule", "big_reasons"} for a task.
 
-    Order: an explicit weights.json rule wins (so a rule with a low weight can silence a
-    false positive); otherwise a percentage found in the description; then keywords.
+    big_reasons is a list of {"type": "rule"|"yellow"|"percent"|"title", "text": ...}.
+    big_rule is True/False when a weights.json rule decides, else None; the app uses it
+    to recompute "big" when you pick your yellow calendars on the phone.
     """
     weight, impact = impact_for(task, config)
-    reasons = []
     if weight is not None:
-        if impact == "high":
-            reasons.append(f"{weight}% van je eindcijfer (weights.json)")
-        return {"weight": weight, "impact": impact, "big": impact == "high", "big_reasons": reasons}
+        big = impact == "high"
+        reasons = [{"type": "rule", "text": f"{weight}% van je eindcijfer (weights.json)"}] if big else []
+        return {"weight": weight, "impact": impact, "big": big, "big_rule": big, "big_reasons": reasons}
 
-    description = task.get("description") or ""
-    pct = percentage_in(description)
+    reasons = []
+    if task.get("calendar") and task["calendar"] in yellow_calendars:
+        reasons.append({"type": "yellow", "text": "Geel in je Canvas-kalender"})
+
+    pct = percentage_in(task.get("description") or "")
     if pct is not None:
         weight, impact = pct, _tier(pct, config)
         if impact == "high":
-            reasons.append(f"Telt voor {pct}% (volgens de beschrijving)")
+            reasons.append({"type": "percent", "text": f"Telt voor {pct}% (volgens de beschrijving)"})
 
     title = task["title"].lower()
-    title_word = next((w for w in BIG_TITLE_WORDS if w in title), None)
-    if title_word:
-        reasons.append(f"Titel bevat '{title_word}'")
-    desc_lower = description.lower()
-    desc_word = next((w for w in BIG_DESCRIPTION_WORDS if w in desc_lower and w != title_word), None)
-    if desc_word:
-        reasons.append(f"Beschrijving vermeldt '{desc_word}'")
+    big_word = next((w for w in BIG_TITLE_WORDS if w in title), None)
+    if big_word and not any(w in title for w in SMALL_TITLE_WORDS):
+        reasons.append({"type": "title", "text": f"Titel: '{big_word}'"})
 
-    return {"weight": weight, "impact": impact, "big": bool(reasons), "big_reasons": reasons}
+    return {"weight": weight, "impact": impact, "big": bool(reasons), "big_rule": None, "big_reasons": reasons}

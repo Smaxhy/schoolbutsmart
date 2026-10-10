@@ -18,14 +18,43 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 
-from canvas_client import CanvasClient, FeedError
+from canvas_client import CanvasClient, FeedError, fetch_course_colors, is_yellow
 from notifier import HIGH_DAYS, URGENT_DAYS, Notifier, filter_upcoming
 from weights import classify, load_weights
 
 log = logging.getLogger("build_site")
 
-PUBLIC_FIELDS = ("title", "course", "due_date", "description", "days_until_due", "urgency", "url",
-                 "weight", "impact", "big", "big_reasons")
+PUBLIC_FIELDS = ("title", "section", "course", "course_short", "due_date", "description", "days_until_due",
+                 "urgency", "url", "weight", "impact", "big", "big_rule", "big_reasons", "kind", "calendar",
+                 "calendar_type", "calendar_name", "color", "all_day", "duration_minutes")
+
+
+def calendar_summary(tasks):
+    """Per Canvas calendar (= one colour in Canvas): how many upcoming items, of which kinds."""
+    calendars = {}
+    for t in tasks:
+        key = t["calendar"] or f"onbekend:{t['course']}"
+        cal = calendars.setdefault(key, {"id": t["calendar"], "type": t["calendar_type"],
+                                         "name": t["calendar_name"], "short": t.get("course_short", ""),
+                                         "color": t.get("color"), "yellow": bool(t.get("yellow")),
+                                         "count": 0, "kinds": {}, "examples": []})
+        cal["count"] += 1
+        cal["kinds"][t["kind"]] = cal["kinds"].get(t["kind"], 0) + 1
+        if len(cal["examples"]) < 4:
+            cal["examples"].append(t["title"])
+    return sorted(calendars.values(), key=lambda c: (-c["count"], c["name"]))
+
+
+def log_report(all_tasks, window_tasks):
+    """Readable overview in the Actions log, to see how the feed is structured."""
+    log.info("Calendar report: %d upcoming items in the feed, %d in the window", len(all_tasks), len(window_tasks))
+    for cal in calendar_summary(all_tasks):
+        log.info("  %-22s %-28s %3d items  colour=%s yellow=%s  %s  e.g. %s", cal["id"] or "-", cal["name"][:28],
+                 cal["count"], cal["color"] or "?", cal["yellow"], cal["kinds"], " | ".join(cal["examples"]))
+    for t in window_tasks:
+        log.info("  task: %s | %s | %s | %s | %s min | big=%s %s", t["due_date"][:16], t["calendar"] or "-",
+                 t["kind"], t["title"][:60], t["duration_minutes"], t["big"],
+                 "; ".join(r["text"] if isinstance(r, dict) else r for r in t["big_reasons"]))
 
 
 def _bool_env(name, default):
@@ -54,11 +83,21 @@ def build(out_dir, web_dir, state_file, notify=True, weights_file=None):
     lookahead = int(os.environ.get("LOOKAHEAD_DAYS") or 14)
 
     client = CanvasClient(feed_url, timezone=os.environ.get("TIMEZONE") or "Europe/Brussels")
-    tasks = filter_upcoming(client.get_tasks(force=True), lookahead)
+    all_tasks = client.get_tasks(force=True)
+
+    # Optional: your Canvas calendar colours, to find the yellow courses automatically.
+    colors = fetch_course_colors(feed_url, os.environ.get("CANVAS_TOKEN", "").strip())
+    yellow = {cal for cal, color in colors.items() if is_yellow(color)}
+    log.info("Canvas colours: %d known, yellow calendars: %s", len(colors), sorted(yellow) or "none")
 
     weights = load_weights(weights_file or "")
-    for task in tasks:
-        task.update(classify(task, weights))
+    for task in all_tasks:
+        task["color"] = colors.get(task["calendar"])
+        task["yellow"] = task["calendar"] in yellow
+        task.update(classify(task, weights, yellow))
+    tasks = filter_upcoming(all_tasks, lookahead)
+
+    log_report(all_tasks, tasks)
 
     sent = 0
     if notify:
@@ -92,6 +131,9 @@ def build(out_dir, web_dir, state_file, notify=True, weights_file=None):
         "thresholds": {"urgent": URGENT_DAYS, "high": HIGH_DAYS},
         "fetched_at": client.fetched_at.isoformat(),
         "app_version": version,
+        "calendars": [{k: c[k] for k in ("id", "type", "name", "short", "color", "yellow", "count", "examples")}
+                      for c in calendar_summary(all_tasks) if c["id"]],
+        "colors_known": bool(colors),
     }
     with open(os.path.join(out_dir, "tasks.json"), "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)

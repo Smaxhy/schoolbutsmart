@@ -5,6 +5,7 @@
   const VIEW_KEY = "artevelde-tasks-view";
   const API_KEY_KEY = "artevelde-tasks-anthropic-key";
   const PLAN_PREFIX = "artevelde-tasks-plan:";
+  const YELLOW_KEY = "artevelde-tasks-yellow-calendars";
   const RELOADED_KEY = "artevelde-tasks-reloaded-for";
   const POLL_MS = 5 * 60 * 1000;
   const APP_VERSION = (document.querySelector('meta[name="app-version"]') || {}).content || "dev";
@@ -120,10 +121,46 @@
     return "later";
   }
 
-  function courseChip(course) {
-    const chip = el("span", "chip", course || "Overig");
-    Object.assign(chip.style, chipColors(course || "Overig"));
+  function courseChip(task) {
+    const name = task.course_short || task.course || "Overig";
+    const chip = el("span", "chip", name);
+    chip.title = task.course || name;
+    if (task.color) {
+      chip.style.background = `color-mix(in srgb, ${task.color} 32%, #1c1e22)`;
+      chip.style.color = `color-mix(in srgb, ${task.color} 55%, #ffffff)`;
+    } else {
+      Object.assign(chip.style, chipColors(task.course || "Overig"));
+    }
     return chip;
+  }
+
+  // ---- big tasks ----------------------------------------------------------
+  // Canvas colours each course; the yellow ones hold the big tasks. You pick them in the
+  // settings (pre-filled from your Canvas colours when the build has a Canvas token).
+
+  function storedYellow() {
+    try {
+      const raw = JSON.parse(storageGet(YELLOW_KEY));
+      return Array.isArray(raw) ? new Set(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function yellowCalendars(data) {
+    return storedYellow() || new Set((data.calendars || []).filter((c) => c.yellow).map((c) => c.id));
+  }
+
+  // Older data had plain strings as reasons.
+  const reasonObj = (r) => (typeof r === "string" ? { type: "title", text: r } : r);
+
+  function bigInfo(task, yellow) {
+    if (task.big_rule === true || task.big_rule === false) {
+      return { big: task.big_rule, reasons: (task.big_reasons || []).map(reasonObj) };
+    }
+    const reasons = (task.big_reasons || []).map(reasonObj).filter((r) => r.type !== "yellow");
+    if (task.calendar && yellow.has(task.calendar)) reasons.unshift({ type: "yellow", text: "Geel in je Canvas-kalender" });
+    return { big: reasons.length > 0, reasons };
   }
 
   function planKey(task) {
@@ -188,10 +225,44 @@
 
   // ---- settings (API key) -----------------------------------------------
 
+  function renderCalendarPicker() {
+    const box = $("calendar-picker");
+    box.replaceChildren();
+    const calendars = (current && current.calendars) || [];
+    if (!calendars.length) {
+      box.append(el("p", "muted small", "Nog geen vakken gevonden. Vernieuw eerst je taken."));
+      return;
+    }
+    const chosen = yellowCalendars(current);
+    $("picker-auto").hidden = !(current.colors_known && !storedYellow());
+    calendars.forEach((cal) => {
+      const row = el("label", "cal-row");
+      const box2 = el("input");
+      box2.type = "checkbox";
+      box2.checked = chosen.has(cal.id);
+      box2.addEventListener("change", () => {
+        const next = yellowCalendars(current);
+        if (box2.checked) next.add(cal.id);
+        else next.delete(cal.id);
+        storageSet(YELLOW_KEY, JSON.stringify([...next]));
+        $("picker-auto").hidden = true;
+        render(current);
+      });
+      const swatch = el("span", "swatch");
+      swatch.style.background = cal.color || chipColors(cal.name || "").background;
+      const text = el("span", "cal-text");
+      text.append(el("strong", null, cal.short || cal.name), el("span", "muted small", ` · ${cal.count} taken`));
+      if (cal.examples && cal.examples.length) text.append(el("span", "cal-examples", cal.examples.slice(0, 2).join(" · ")));
+      row.append(box2, swatch, text);
+      box.append(row);
+    });
+  }
+
   function openSettings() {
     apiKeyInput.value = storageGet(API_KEY_KEY) || "";
+    renderCalendarPicker();
     settingsEl.showModal();
-    apiKeyInput.focus();
+    settingsEl.scrollTop = 0;
   }
 
   $("settings").addEventListener("click", openSettings);
@@ -276,7 +347,7 @@
   // ---- detail sheet -----------------------------------------------------
 
   function openDetail(item) {
-    const { task, due, days, urgency } = item;
+    const { task, due, days, urgency, big, reasons } = item;
     if (planAbort) planAbort.abort();
     const inner = el("div", "sheet-inner");
 
@@ -285,7 +356,7 @@
     close.type = "button";
     close.setAttribute("aria-label", "Sluiten");
     close.addEventListener("click", () => detailEl.close());
-    head.append(courseChip(task.course), close);
+    head.append(courseChip(task), close);
 
     const title = el("h2", null, task.title);
     title.id = "detail-title";
@@ -295,15 +366,15 @@
 
     const facts = el("div", "facts");
     facts.append(el("span", `fact ${urgency}`, countdown(days)));
-    if (task.big) facts.append(el("span", "fact big", "★ Grote taak"));
+    if (big) facts.append(el("span", "fact big", "★ Grote taak"));
     if (typeof task.weight === "number") facts.append(el("span", "fact", `${task.weight}% van je eindcijfer`));
 
     inner.append(head, title, when, facts);
 
-    if (task.big && task.big_reasons && task.big_reasons.length) {
+    if (big && reasons.length) {
       inner.append(el("h3", null, "Waarom een grote taak"));
       const ul = el("ul", "reasons");
-      task.big_reasons.forEach((r) => ul.append(el("li", null, r)));
+      reasons.forEach((r) => ul.append(el("li", null, r.text)));
       inner.append(ul);
     }
 
@@ -348,8 +419,8 @@
   // ---- list rendering ---------------------------------------------------
 
   function renderCard(item) {
-    const { task, due, days, urgency } = item;
-    const card = el("article", `card ${urgency}${task.big ? " is-big" : ""}`);
+    const { task, due, days, urgency, big } = item;
+    const card = el("article", `card ${urgency}${big ? " is-big" : ""}`);
     card.tabIndex = 0;
     card.setAttribute("role", "button");
     card.setAttribute("aria-label", `${task.title}, ${countdown(days)}. Details bekijken`);
@@ -359,11 +430,11 @@
 
     const bodyEl = el("div", "card-body");
     const top = el("div", "card-top");
-    top.append(courseChip(task.course), el("span", "countdown", countdown(days)));
+    top.append(courseChip(task), el("span", "countdown", countdown(days)));
 
     const meta = el("div", "card-meta");
     meta.append(el("span", null, formatTime(due)));
-    if (task.big) meta.append(el("span", "badge big", "★ Groot"));
+    if (big) meta.append(el("span", "badge big", "★ Groot"));
     if (typeof task.weight === "number") meta.append(el("span", "badge weight", `${task.weight}%`));
 
     bodyEl.append(top, el("h3", null, task.title), meta);
@@ -408,15 +479,16 @@
     const thresholds = data.thresholds || { urgent: 2, high: 7 };
     const lookahead = data.lookahead_days || 14;
 
+    const yellow = yellowCalendars(data);
     const all = (data.tasks || [])
       .map((task) => {
         const due = wallClock(task.due_date);
         const days = daysUntil(due, now);
-        return { task, due, days, urgency: urgencyFor(days, thresholds), group: weekGroup(due, now) };
+        return { task, due, days, urgency: urgencyFor(days, thresholds), group: weekGroup(due, now), ...bigInfo(task, yellow) };
       })
       .filter((i) => i.due >= now && i.days <= lookahead)
       .sort((a, b) => a.due - b.due);
-    const big = all.filter((i) => i.task.big);
+    const big = all.filter((i) => i.big);
 
     $("stat-urgent").textContent = all.filter((i) => i.urgency === "urgent").length;
     $("stat-week").textContent = all.filter((i) => i.group === "this").length;
@@ -438,7 +510,7 @@
       return;
     }
     if (big.length) appEl.append(section("★ Grote taken", big, "big"));
-    weekSections(all.filter((i) => !i.task.big)).forEach((s) => appEl.append(s));
+    weekSections(all.filter((i) => !i.big)).forEach((s) => appEl.append(s));
   }
 
   // A rendering bug must never leave the page stuck on "Laden…".
