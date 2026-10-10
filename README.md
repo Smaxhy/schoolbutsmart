@@ -59,15 +59,22 @@ Things to know:
 - GitHub pauses scheduled workflows in a repo with no activity for 60 days. If notifications stop, open the Actions tab and re-enable the workflow.
 - If the feed can't be fetched, the run fails (GitHub emails you) and the previous version of the site stays online.
 
-## Big tasks
+## Big tasks (the yellow ones)
 
-A task counts as a *grote taak* when any of these hold:
+Canvas colours every course in its calendar, and your big tasks are usually the ones in the **yellow** course(s). The iCal feed doesn't contain colours (see `IcalEvent` in canvas-lms `app/models/calendar_event.rb`), but it does say which course calendar each item belongs to, so the app works with that:
 
-1. A `weights.json` rule matches with a weight ≥ `high_from` (a rule with a low weight also *removes* a task from big tasks, handy for false positives).
-2. The description mentions a percentage of the grade ≥ `high_from`, e.g. "telt voor 30% van het eindcijfer".
-3. The title contains a word like *examen, project, paper, portfolio, eindwerk, presentatie, groepswerk* (full list in `weights.py`), or the description mentions an exam, final assignment or group work.
+- **Pick them yourself:** in the app tap ⚙️ → *Grote taken* and tick the courses that are yellow in your Canvas calendar. Everything from those courses goes to ★ Grote taken. Saved on that device.
+- **Or let it detect yellow automatically:** add a Canvas access token as repo secret `CANVAS_TOKEN` (Canvas → Account → Settings → *New access token*). The build then reads your own course colours with `GET /api/v1/users/self/colors` and pre-ticks the yellow courses. The token stays in GitHub secrets and is only used for that call; your school may not allow student tokens, in which case just pick them by hand.
 
-The detail view lists the reason(s) under "Waarom een grote taak".
+On top of the yellow courses, a task is also big when:
+
+1. a `weights.json` rule gives it a weight ≥ `high_from` (a rule with a **low** weight marks a task as *not* big, which beats everything else),
+2. its description says it counts for ≥ `high_from` % of the grade ("telt voor 30% van het eindcijfer"), or
+3. its title names an evaluation moment: *examen, tentamen, tussentijdse …, eindopdracht, eindwerk, eindproject, portfolio, jury, …* (never for weekly work like *Lesopdracht, Lesweek, Journalopdracht, @HOME, oefening*).
+
+Words in the description are deliberately ignored: course templates mention "examen" in every assignment, which used to flag weekly exercises.
+
+The detail view lists why a task counts as big. Each Actions run also logs a per-course overview (items, colour, yellow or not) so you can check the detection.
 
 ## ✨ Plan met Claude
 
@@ -122,6 +129,7 @@ Run the tests with `python -m unittest discover -s tests -t .`.
 | `LOOKAHEAD_DAYS` | `14` | How many days ahead to show and notify |
 | `TIMEZONE` | `Europe/Brussels` | Timezone for due dates |
 | `NOTIFY_DEFAULT_TIER` | `true` | Also notify for green (>7 days) tasks |
+| `CANVAS_TOKEN` | – | Optional Canvas access token, only used to read your course colours (auto-detect yellow) |
 | `BASE_URL` | set by the workflow | Dashboard URL used as the tap-through link in notifications |
 
 ## Add the PWA to your phone's home screen

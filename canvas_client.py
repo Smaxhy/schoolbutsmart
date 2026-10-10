@@ -32,6 +32,8 @@ _UID_RE = re.compile(r"^event-([a-z-]+?)-(\d+)$")
 _CONTEXT_RE = re.compile(r"[?&]include_contexts=([a-z_]+?)_(\d+)")
 _URL_HOST_RE = re.compile(r"^(https?://[^/]+)/")
 _ANCHOR_ID_RE = re.compile(r"#(?:assignment|sub_assignment)_(\d+)$")
+# Canvas appends the section of an assignment override to the title: "Opdracht 3 (AVD1-B@S1)".
+_SECTION_RE = re.compile(r"\s*\(([^()]*@[^()]*)\)\s*$")
 CALENDAR_TYPE_NAMES = {"user": "Persoonlijke agenda", "account": "Schoolagenda", "group": "Groepsagenda",
                        "appointment_group": "Afspraken"}
 
@@ -61,6 +63,51 @@ def canvas_meta(uid, url, course):
         link = f"{host.group(1)}/courses/{ctx.group(2)}/assignments/{anchor.group(1)}"
     return {"kind": kind, "calendar": calendar, "calendar_type": calendar_type,
             "calendar_name": calendar_name, "link": link}
+
+
+def split_section(title):
+    """("Opdracht 3 (AVD1-B@S1)") -> ("Opdracht 3", "AVD1-B@S1")."""
+    match = _SECTION_RE.search(title)
+    if not match:
+        return title, ""
+    return title[:match.start()].strip() or title, match.group(1).strip()
+
+
+def short_course(course):
+    """'PBAGDM - STORY1 - Semester 1' -> 'STORY1'; anything else is returned unchanged."""
+    parts = [p.strip() for p in course.split(" - ") if p.strip()]
+    return parts[1] if len(parts) >= 3 else course
+
+
+def fetch_course_colors(feed_url, token, session=None, timeout=15):
+    """Your own Canvas calendar colours: {"course_44401": "#f0c61c", ...}.
+
+    Uses GET /api/v1/users/self/colors (Canvas Users API "Get custom colors") on the same
+    Canvas host as the feed. Returns {} on any problem; colours are a nice-to-have.
+    """
+    host = re.match(r"^(?:https?|webcal)://([^/]+)/", feed_url or "", re.I)
+    if not host or not token:
+        return {}
+    try:
+        resp = (session or requests).get(f"https://{host.group(1)}/api/v1/users/self/colors",
+                                         headers={"Authorization": f"Bearer {token}"}, timeout=timeout)
+        resp.raise_for_status()
+        colors = resp.json().get("custom_colors", {})
+    except (requests.RequestException, ValueError, AttributeError) as exc:
+        log.warning("Could not read Canvas colours (%s)", type(exc).__name__)
+        return {}
+    return {k: v for k, v in colors.items() if isinstance(v, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", v)}
+
+
+def is_yellow(hex_color):
+    """True for yellow-ish colours (hue ~40-70°, clearly saturated and bright)."""
+    try:
+        r, g, b = (int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    except (TypeError, ValueError):
+        return False
+    import colorsys
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    return 38 <= h * 360 <= 72 and s >= 0.45 and v >= 0.55
 
 
 class FeedError(Exception):
@@ -156,12 +203,14 @@ class CanvasClient:
                 description = clean_text(component.get("description", ""))
                 location = clean_text(component.get("location", ""))
                 course, title = split_course(summary, description, location)
+                title, section = split_section(title)
                 uid = str(component.get("uid") or f"{summary}|{start}")
                 url = str(component.get("url") or "")
                 end = component.decoded("dtend", None)
                 events.append({
                     "uid": uid,
                     "title": title,
+                    "section": section,
                     "course": course,
                     "due": self._to_local(start),
                     "end": self._to_local(end) if end is not None else None,
@@ -224,7 +273,9 @@ class CanvasClient:
             tasks.append({
                 "uid": event["uid"],
                 "title": event["title"],
+                "section": event["section"],
                 "course": event["course"],
+                "course_short": short_course(event["course"]),
                 "due_date": event["due"].isoformat(),
                 "description": description,
                 "days_until_due": days,

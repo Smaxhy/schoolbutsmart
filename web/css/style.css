@@ -301,6 +301,23 @@ input[type="password"], input[type="text"] {
   font: inherit;
 }
 
+/* calendar picker */
+.cal-list { display: flex; flex-direction: column; gap: 6px; }
+.cal-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg);
+  cursor: pointer;
+}
+.cal-row input { width: 20px; height: 20px; accent-color: var(--big); flex: none; }
+.swatch { flex: none; width: 14px; height: 14px; border-radius: 4px; }
+.cal-text { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; }
+.cal-examples { flex-basis: 100%; font-size: .78rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.auto-note { color: #d4c5ff; margin: 0 0 8px; }
+
 /* Claude output */
 .ai {
   margin-top: 14px;

@@ -199,8 +199,8 @@ class WeightTests(unittest.TestCase):
 class BigTaskTests(unittest.TestCase):
     cfg = {"high_from": 20, "medium_from": 10, "rules": []}
 
-    def task(self, title, description="", course="Web"):
-        return {"title": title, "description": description, "course": course}
+    def task(self, title, description="", course="Web", calendar="course_1"):
+        return {"title": title, "description": description, "course": course, "calendar": calendar}
 
     def test_percentage(self):
         self.assertEqual(percentage_in("Deze opdracht telt voor 30% van het eindcijfer."), 30)
@@ -208,23 +208,62 @@ class BigTaskTests(unittest.TestCase):
         self.assertIsNone(percentage_in("Zorg dat 100% van de code getest is."))
         self.assertIsNone(percentage_in(""))
 
-    def test_classify(self):
-        big = classify(self.task("Examen januari"), self.cfg)
+    def test_real_titles(self):
+        # Titles from a real Artevelde (Grafische en Digitale Media) feed.
+        small = ['Lesweek 3 "Koor"', "Journalopdracht week 3", "Lesopdracht 1: Parenting",
+                 "3. @HOME pentools", "3.3 BUSHALTE: Retouche en toevoegen van lokale lichtinval",
+                 "Opdracht 3 LFM: Beeld en Sfeer"]
+        for title in small:
+            # Course templates mention "examen" in every description: that must not count.
+            self.assertFalse(classify(self.task(title, "Voorbereiding op het examen."), self.cfg)["big"], title)
+        big = classify(self.task("Tussentijdse opdracht: Illustratief"), self.cfg)
         self.assertTrue(big["big"])
-        self.assertIn("examen", big["big_reasons"][0])
+        self.assertEqual(big["big_reasons"][0]["type"], "title")
+        self.assertTrue(classify(self.task("Examen Typografie"), self.cfg)["big"])
 
+    def test_yellow_calendar(self):
+        result = classify(self.task("Lesopdracht 2: Vrije paden", calendar="course_44401"), self.cfg, {"course_44401"})
+        self.assertTrue(result["big"])
+        self.assertEqual(result["big_reasons"], [{"type": "yellow", "text": "Geel in je Canvas-kalender"}])
+        self.assertFalse(classify(self.task("Lesopdracht 2", calendar="course_1"), self.cfg, {"course_44401"})["big"])
+
+    def test_percent_and_rules(self):
         by_pct = classify(self.task("Opdracht 3", "Telt mee voor 40% van je eindcijfer."), self.cfg)
         self.assertEqual((by_pct["weight"], by_pct["impact"], by_pct["big"]), (40, "high", True))
-
         small = classify(self.task("Quiz week 2", "Telt voor 5% van de punten."), self.cfg)
         self.assertEqual((small["impact"], small["big"]), ("low", False))
+        # A low-weight rule overrides everything else, including yellow.
+        cfg = dict(self.cfg, rules=[{"title": "tussentijds", "course": "", "weight": 5}])
+        res = classify(self.task("Tussentijdse opdracht", calendar="course_9"), cfg, {"course_9"})
+        self.assertEqual((res["big"], res["big_rule"]), (False, False))
 
-        plain = classify(self.task("Leesopdracht"), self.cfg)
-        self.assertEqual(plain, {"weight": None, "impact": None, "big": False, "big_reasons": []})
 
-    def test_rule_overrides_keywords(self):
-        cfg = dict(self.cfg, rules=[{"title": "project", "course": "", "weight": 5}])
-        self.assertFalse(classify(self.task("Projectweek reflectie"), cfg)["big"])
+class ColorTests(unittest.TestCase):
+    def test_yellow_detection(self):
+        from canvas_client import is_yellow
+        for color in ("#F0C61C", "#FFD700", "#E1A80B", "#8D9900"):
+            self.assertTrue(is_yellow(color), color)
+        for color in ("#E1185C", "#008400", "#1770AB", "#FFF3B0", "#D97900", "bad"):
+            self.assertFalse(is_yellow(color), color)
+
+    def test_fetch_colors(self):
+        from canvas_client import fetch_course_colors
+        session = mock.Mock()
+        session.get.return_value.json.return_value = {"custom_colors": {"course_1": "#F0C61C", "user_2": "nope"}}
+        colors = fetch_course_colors("webcal://canvas.example/feeds/calendars/user_x.ics", "tok", session=session)
+        self.assertEqual(colors, {"course_1": "#F0C61C"})
+        url = session.get.call_args[0][0]
+        self.assertEqual(url, "https://canvas.example/api/v1/users/self/colors")
+        self.assertEqual(fetch_course_colors("https://canvas.example/f.ics", ""), {})
+
+    def test_canvas_meta_and_titles(self):
+        from canvas_client import canvas_meta, short_course, split_section
+        meta = canvas_meta("event-assignment-123",
+                           "https://c.example/calendar?include_contexts=course_55&month=10&year=2026#assignment_123", "X")
+        self.assertEqual((meta["kind"], meta["calendar"], meta["link"]),
+                         ("assignment", "course_55", "https://c.example/courses/55/assignments/123"))
+        self.assertEqual(split_section('Lesweek 3 "Koor" (AVD1-B@S1)'), ('Lesweek 3 "Koor"', "AVD1-B@S1"))
+        self.assertEqual(short_course("PBAGDM - STORY1 - Semester 1"), "STORY1")
 
 
 class BuildTests(unittest.TestCase):
@@ -245,7 +284,8 @@ class BuildTests(unittest.TestCase):
             self.assertNotIn("uid", data["tasks"][0])
             self.assertEqual((data["tasks"][0]["weight"], data["tasks"][0]["impact"]), (30, "high"))
             self.assertTrue(data["tasks"][0]["big"])
-            self.assertEqual(data["tasks"][1]["big_reasons"], ["Titel bevat 'examen'"])
+            self.assertEqual(data["tasks"][1]["big_reasons"], [{"type": "title", "text": "Titel: 'examen'"}])
+            self.assertIn("calendars", data)
             self.assertEqual(data["thresholds"], {"urgent": 2, "high": 7})
             with open(os.path.join(out, "index.html"), encoding="utf-8") as fh:
                 self.assertIn(f'<meta name="app-version" content="{data["app_version"]}">', fh.read())

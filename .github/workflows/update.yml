@@ -41,6 +41,7 @@ jobs:
         env:
           ICAL_FEED_URL: ${{ secrets.ICAL_FEED_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          CANVAS_TOKEN: ${{ secrets.CANVAS_TOKEN }}
           LOOKAHEAD_DAYS: ${{ vars.LOOKAHEAD_DAYS }}
           NOTIFY_DEFAULT_TIER: ${{ vars.NOTIFY_DEFAULT_TIER }}
           BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
