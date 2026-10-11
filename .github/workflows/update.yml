@@ -43,6 +43,7 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           CANVAS_TOKEN: ${{ secrets.CANVAS_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_WORKSPACE_ID: ${{ secrets.ANTHROPIC_WORKSPACE_ID || vars.ANTHROPIC_WORKSPACE_ID }}
           LOOKAHEAD_DAYS: ${{ vars.LOOKAHEAD_DAYS }}
           NOTIFY_DEFAULT_TIER: ${{ vars.NOTIFY_DEFAULT_TIER }}
           BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/

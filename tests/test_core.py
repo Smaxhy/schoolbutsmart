@@ -378,3 +378,11 @@ class AiHelperTests(unittest.TestCase):
         models = [c.kwargs["model"] for c in client.messages.create.call_args_list]
         self.assertEqual(models[:2], ["claude-haiku-5-5", "claude-haiku-4-5"])
         self.assertNotIn("output_config", client.messages.create.call_args_list[1].kwargs)
+
+    def test_workspace_header(self):
+        import ai_helper
+        with mock.patch.dict(os.environ, {"ANTHROPIC_WORKSPACE_ID": "wrkspc_123"}), \
+                mock.patch("anthropic.Anthropic") as cls:
+            cls.return_value = self.fake_client()
+            ai_helper.add_help(self.tasks()[:1], self.cache, "key", "x")
+        self.assertEqual(cls.call_args.kwargs["default_headers"], {"anthropic-workspace-id": "wrkspc_123"})
