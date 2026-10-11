@@ -4,6 +4,7 @@
   const CACHE_KEY = "artevelde-tasks-cache-v1";
   const VIEW_KEY = "artevelde-tasks-view";
   const API_KEY_KEY = "artevelde-tasks-anthropic-key";
+  const WORKSPACE_KEY = "artevelde-tasks-anthropic-workspace";
   const PLAN_PREFIX = "artevelde-tasks-plan:";
   const YELLOW_KEY = "artevelde-tasks-yellow-calendars";
   const RELOADED_KEY = "artevelde-tasks-reloaded-for";
@@ -260,6 +261,7 @@
 
   function openSettings() {
     apiKeyInput.value = storageGet(API_KEY_KEY) || "";
+    $("workspace-id").value = storageGet(WORKSPACE_KEY) || "";
     renderCalendarPicker();
     settingsEl.showModal();
     settingsEl.scrollTop = 0;
@@ -275,6 +277,7 @@
     if (settingsEl.returnValue === "save") {
       const key = apiKeyInput.value.trim();
       storageSet(API_KEY_KEY, key || null);
+      storageSet(WORKSPACE_KEY, $("workspace-id").value.trim() || null);
     }
   });
 
@@ -347,8 +350,55 @@
     return form;
   }
 
+  // Keys that aren't tied to a workspace need the workspace ID with every request.
+  function workspaceForm(task, box) {
+    const form = el("div", "key-form");
+    form.append(el("p", null, "Je API-sleutel hoort niet bij een workspace. Kies één van deze twee:"));
+    const ol = el("ol");
+    const a = el("li");
+    a.append("Plak je ", el("strong", null, "workspace-ID"), " (begint met wrkspc_). Je vindt het op ",
+      linkOut(el("a", null, "console.anthropic.com → Settings → Workspaces"), "https://console.anthropic.com/settings/workspaces"),
+      ": open de workspace, het ID staat in de adresbalk.");
+    const b = el("li");
+    b.append("Of maak een nieuwe sleutel ín een workspace (Settings → Workspaces → kies er een → API keys → Create key) en plak die hieronder.");
+    ol.append(a, b);
+    const ws = el("input");
+    ws.type = "text";
+    ws.placeholder = "wrkspc_…";
+    ws.autocomplete = "off";
+    ws.spellcheck = false;
+    ws.value = storageGet(WORKSPACE_KEY) || "";
+    const key = el("input");
+    key.type = "password";
+    key.placeholder = "nieuwe sleutel (optioneel)";
+    key.autocomplete = "off";
+    const save = el("button", "btn primary", "Opslaan en opnieuw");
+    save.type = "button";
+    save.addEventListener("click", () => {
+      const id = ws.value.trim();
+      if (id && !/^wrkspc_[A-Za-z0-9]+$/.test(id)) {
+        ws.setCustomValidity("Een workspace-ID begint met wrkspc_");
+        ws.reportValidity();
+        return;
+      }
+      storageSet(WORKSPACE_KEY, id || null);
+      if (key.value.trim()) storageSet(API_KEY_KEY, key.value.trim());
+      sendToClaude(task, box, box.dataset.retryText || "");
+    });
+    ws.addEventListener("input", () => ws.setCustomValidity(""));
+    form.append(ol, ws, key);
+    const row = el("div", "row");
+    row.append(save);
+    form.append(row);
+    return form;
+  }
+
   function composer(task, box, hasFirst, busy) {
     const wrap = el("div", "composer");
+    if (box.dataset.needsWorkspace === "1") {
+      wrap.append(workspaceForm(task, box));
+      return wrap;
+    }
     if (!storageGet(API_KEY_KEY)) {
       wrap.append(keyForm(task, box));
       return wrap;
@@ -440,6 +490,7 @@
 
       const answer = await streamChat({
         apiKey,
+        workspaceId: storageGet(WORKSPACE_KEY) || "",
         system: current && current.ai_system_prompt,
         messages,
         signal: controller.signal,
@@ -453,8 +504,13 @@
       } else {
         saveChat(task, [...turns, { role: "user", content: text }, { role: "assistant", content: answer }]);
       }
+      delete box.dataset.needsWorkspace;
       if (planAbort === controller) renderHelp(task, box);
     } catch (err) {
+      if (err && err.needsWorkspace) {
+        box.dataset.needsWorkspace = "1";
+        box.dataset.retryText = text;
+      }
       if (planAbort === controller) renderHelp(task, box, { error: (err && err.message) || "Er ging iets mis." });
     } finally {
       if (planAbort === controller) planAbort = null;

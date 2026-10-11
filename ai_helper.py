@@ -121,7 +121,10 @@ def add_help(tasks, cache_path, api_key, today, client=None):
     new = 0
     if missing and api_key:
         if client is None:
-            client = anthropic.Anthropic(api_key=api_key, max_retries=2, timeout=120)
+            workspace = os.environ.get("ANTHROPIC_WORKSPACE_ID", "").strip()
+            # Keys not scoped to a workspace must name one in this header.
+            headers = {"anthropic-workspace-id": workspace} if workspace else None
+            client = anthropic.Anthropic(api_key=api_key, max_retries=2, timeout=120, default_headers=headers)
         for task in missing[:MAX_NEW_PER_RUN]:
             try:
                 text = ask_claude(client, task, today)

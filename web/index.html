@@ -74,6 +74,8 @@
       <p class="muted">GitHub laat Claude Haiku elke taak automatisch maken (secret <strong>ANTHROPIC_API_KEY</strong>). Met een sleutel hier kun je Claude per taak ook zelf vragen stellen en aanpassingen laten maken. Hij blijft <strong>alleen op dit toestel</strong>.</p>
       <label for="api-key" class="label">Anthropic API-sleutel</label>
       <input id="api-key" name="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+      <label for="workspace-id" class="label">Workspace-ID <span class="muted small">(alleen als Anthropic erom vraagt)</span></label>
+      <input id="workspace-id" name="workspace-id" type="text" autocomplete="off" spellcheck="false" placeholder="wrkspc_…">
       <p class="muted small">Maak er een aan op <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com</a>.</p>
       <div class="row">
         <button id="key-save" class="btn primary" value="save">Opslaan</button>

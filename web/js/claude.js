@@ -37,7 +37,12 @@ export function taskPrompt(task, today, dueText) {
   return lines.join("\n");
 }
 
-export class ClaudeError extends Error {}
+export class ClaudeError extends Error {
+  constructor(message, { needsWorkspace = false } = {}) {
+    super(message);
+    this.needsWorkspace = needsWorkspace;
+  }
+}
 
 // Anthropic's own explanation, e.g. "Your credit balance is too low to access the Anthropic API."
 function apiDetail(err) {
@@ -52,6 +57,9 @@ function friendlyError(err) {
   if (status === 401) return new ClaudeError("Je API-sleutel klopt niet. Plak hem opnieuw.");
   if (status === 403) return new ClaudeError("Deze API-sleutel heeft geen toegang. Controleer je Anthropic-account.");
   if (status === 429) return new ClaudeError("Te veel aanvragen of je tegoed is op. Probeer het straks opnieuw.");
+  if (status === 400 && /workspace/i.test(detail)) {
+    return new ClaudeError("Je API-sleutel hoort niet bij een workspace. Vul hieronder je workspace-ID in, of gebruik een sleutel uit een workspace.", { needsWorkspace: true });
+  }
   if (/credit/i.test(detail || (err && err.message) || "")) {
     return new ClaudeError("Je Anthropic-tegoed is op. Vul het aan op console.anthropic.com → Billing.");
   }
@@ -64,10 +72,16 @@ function friendlyError(err) {
  * Stream one answer for a conversation ([{role, content}], ending with a user turn).
  * Calls onText(fullTextSoFar) as text arrives; resolves with the final text.
  */
-export async function streamChat({ apiKey, system, messages, onText, signal }) {
+export async function streamChat({ apiKey, workspaceId, system, messages, onText, signal }) {
   try {
     const { default: Anthropic } = await loadSdk();
-    const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true, maxRetries: 1 });
+    const client = new Anthropic({
+      apiKey,
+      dangerouslyAllowBrowser: true,
+      maxRetries: 1,
+      // Needed for API keys that aren't scoped to a workspace (Anthropic says so in a 400).
+      defaultHeaders: workspaceId ? { "anthropic-workspace-id": workspaceId } : undefined,
+    });
 
     for (const model of MODELS) {
       const params = { model, max_tokens: 16000, system: system || FALLBACK_SYSTEM_PROMPT, messages };
