@@ -302,3 +302,64 @@ class BuildTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AiHelperTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.cache = os.path.join(self.dir.name, "help.json")
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def tasks(self):
+        return [{"title": "Journalopdracht week 3", "course": "STORY1", "description": "Schrijf 300 woorden.",
+                 "due_date": "2026-10-14T23:59:00+02:00", "weight": None},
+                {"title": "Tussentijdse opdracht", "course": "MOT1", "description": "",
+                 "due_date": "2026-10-18T23:59:00+02:00", "weight": 30}]
+
+    def fake_client(self, stop_reason="end_turn"):
+        import types
+        client = mock.Mock()
+        block = types.SimpleNamespace(type="text", text="## Wat wordt er gevraagd\nIets.")
+        thinking = types.SimpleNamespace(type="thinking", thinking="")
+        client.messages.create.return_value = types.SimpleNamespace(stop_reason=stop_reason, content=[thinking, block])
+        return client
+
+    def test_generates_once_then_caches(self):
+        import ai_helper
+        client = self.fake_client()
+        tasks = self.tasks()
+        self.assertEqual(ai_helper.add_help(tasks, self.cache, "key", "2026-10-11 10:00", client=client), 2)
+        self.assertEqual(tasks[0]["help"], "## Wat wordt er gevraagd\nIets.")
+        kwargs = client.messages.create.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-haiku-5-5")
+        self.assertIn("Gewicht: 30%", kwargs["messages"][0]["content"])
+        # Second run: everything comes from the cache, no new calls.
+        again = self.tasks()
+        self.assertEqual(ai_helper.add_help(again, self.cache, "key", "2026-10-11 10:30", client=client), 0)
+        self.assertEqual(client.messages.create.call_count, 2)
+        self.assertTrue(all(t["help"] for t in again))
+        # A changed description means a new answer.
+        changed = self.tasks()
+        changed[0]["description"] = "Schrijf 500 woorden."
+        self.assertEqual(ai_helper.add_help(changed, self.cache, "key", "x", client=client), 1)
+
+    def test_refusal_and_no_key(self):
+        import ai_helper
+        tasks = self.tasks()
+        self.assertEqual(ai_helper.add_help(tasks, self.cache, "key", "x", client=self.fake_client("refusal")), 0)
+        self.assertIsNone(tasks[0]["help"])
+        client = self.fake_client()
+        self.assertEqual(ai_helper.add_help(self.tasks(), self.cache, "", "x", client=client), 0)
+        client.messages.create.assert_not_called()
+
+    def test_bad_key_stops(self):
+        import anthropic
+        import httpx2 as httpx
+        import ai_helper
+        client = mock.Mock()
+        resp = httpx.Response(401, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+        client.messages.create.side_effect = anthropic.AuthenticationError("bad key", response=resp, body=None)
+        self.assertEqual(ai_helper.add_help(self.tasks(), self.cache, "key", "x", client=client), 0)
+        self.assertEqual(client.messages.create.call_count, 1)

@@ -280,16 +280,58 @@
 
   // ---- Claude plan ------------------------------------------------------
 
+  // Where the repo's Actions secrets live, derived from <user>.github.io/<repo>/.
+  function secretsUrl() {
+    const user = location.hostname.endsWith(".github.io") ? location.hostname.split(".")[0] : "";
+    const repo = location.pathname.split("/").filter(Boolean)[0] || "";
+    return user && repo ? `https://github.com/${user}/${repo}/settings/secrets/actions` : "https://github.com";
+  }
+
+  function renderSetupHelp(box, task) {
+    box.replaceChildren();
+    box.hidden = false;
+    const head = el("div", "ai-head");
+    head.append(el("strong", null, "✨ Hulp van Claude"));
+    box.append(head);
+    const body = el("div", "ai-body");
+    body.append(el("p", null, "Claude maakt voor elke taak automatisch een stappenplan en een uitwerking, maar heeft daarvoor één keer je Anthropic API-sleutel nodig."));
+    const ol = el("ol");
+    const li1 = el("li");
+    li1.append("Maak een sleutel op ", linkOut(el("a", null, "console.anthropic.com"), "https://console.anthropic.com/settings/keys"), ".");
+    const li2 = el("li");
+    li2.append("Zet hem als secret ", el("strong", null, "ANTHROPIC_API_KEY"), " in ", linkOut(el("a", null, "GitHub → Secrets"), secretsUrl()), ".");
+    ol.append(li1, li2, el("li", null, "Binnen 30 minuten staat de hulp bij al je taken klaar."));
+    body.append(ol);
+    box.append(body);
+    const row = el("div", "row");
+    const local = el("button", "btn", "Nu meteen: sleutel op dit toestel");
+    local.type = "button";
+    local.addEventListener("click", openSettings);
+    row.append(local);
+    box.append(row);
+  }
+
+  // Order: an answer made on this device, the one prepared by the build, a live answer
+  // with this device's key, or instructions to set it up.
+  function showHelp(task, box) {
+    const local = storageGet(planKey(task));
+    if (local) return renderPlanBox(box, task, local);
+    if (task.help) return renderPlanBox(box, task, task.help);
+    if (storageGet(API_KEY_KEY)) return runPlan(task, box);
+    return renderSetupHelp(box, task);
+  }
+
   function renderPlanBox(box, task, text, { streaming = false, error = null } = {}) {
     box.replaceChildren();
+    box.hidden = false;
     const head = el("div", "ai-head");
-    head.append(el("strong", null, "✨ Plan van Claude"));
+    head.append(el("strong", null, "✨ Hulp van Claude"));
     if (streaming) {
       const stop = el("button", null, "Stop");
       stop.type = "button";
       stop.addEventListener("click", () => planAbort && planAbort.abort());
       head.append(stop);
-    } else if (text) {
+    } else if (text && storageGet(API_KEY_KEY)) {
       const again = el("button", null, "Opnieuw");
       again.type = "button";
       again.addEventListener("click", () => runPlan(task, box));
@@ -304,16 +346,13 @@
 
     if (error) box.append(el("p", "status error", error));
     if (!streaming && text) {
-      box.append(el("p", "ai-note", "Gebruik dit als hulp om te plannen. Controleer altijd de opdracht en de regels over AI in Canvas."));
+      box.append(el("p", "ai-note", "Gemaakt door Claude Haiku. Maak het je eigen en check wat je vak toelaat over AI-gebruik."));
     }
   }
 
   async function runPlan(task, box) {
     const apiKey = storageGet(API_KEY_KEY);
-    if (!apiKey) {
-      openSettings();
-      return;
-    }
+    if (!apiKey) return renderSetupHelp(box, task);
     if (planAbort) planAbort.abort();
     const controller = new AbortController();
     planAbort = controller;
@@ -326,6 +365,7 @@
       const now = new Date();
       latest = await streamPlan(task, apiKey, {
         signal: controller.signal,
+        system: current && current.ai_system_prompt,
         today: `${formatLong(now)} ${formatTime(now)}`,
         onText: (text) => {
           latest = text;
@@ -385,7 +425,7 @@
     inner.append(body);
 
     const actions = el("div", "row");
-    const planBtn = el("button", "btn claude", "✨ Plan met Claude");
+    const planBtn = el("button", "btn claude", task.help ? "✨ Hulp van Claude" : "✨ Vraag Claude");
     planBtn.type = "button";
     actions.append(planBtn);
     if (task.url && /^https?:\/\//i.test(task.url)) {
@@ -396,7 +436,10 @@
     const planBox = el("div", "ai");
     planBox.hidden = true;
     inner.append(planBox);
-    planBtn.addEventListener("click", () => runPlan(task, planBox));
+    planBtn.addEventListener("click", () => {
+      showHelp(task, planBox);
+      planBox.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
 
     const saved = storageGet(planKey(task));
     if (saved) {

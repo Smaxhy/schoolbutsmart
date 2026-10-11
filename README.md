@@ -5,7 +5,7 @@ A small app that runs entirely on GitHub (Actions + Pages) and reads your assign
 - Python script run every 30 minutes by GitHub Actions, vanilla HTML/CSS/JS frontend on GitHub Pages, installable as a PWA. No server to host or keep awake.
 - Tap a task to see the full details: what you need to do, the exact deadline, its grade weight, and an **Open in Canvas** button.
 - **Grote taken** (big tasks) get their own section and tab. They're detected automatically from the title and description (exams, projects, papers, portfolios, "telt voor 30% van het eindcijfer", ...) and from your own `weights.json`.
-- **✨ Plan met Claude**: one tap and Claude writes a study plan for an assignment: what's asked, steps with dates before the deadline, a hand-in checklist and how to start. It plans with you; it doesn't write the assignment for you.
+- **✨ Hulp van Claude**: for every task, Claude Haiku prepares a step plan and a worked-out first version, ready the moment you tap the button.
 - Tasks grouped by week ("Deze week", "Volgende week", "Later"), colour-coded by urgency:
   - 🔴 due within 2 days (ntfy priority 5)
   - 🟠 due within 7 days (priority 4)
@@ -76,13 +76,20 @@ Words in the description are deliberately ignored: course templates mention "exa
 
 The detail view lists why a task counts as big. Each Actions run also logs a per-course overview (items, colour, yellow or not) so you can check the detection.
 
-## ✨ Plan met Claude
+## ✨ Hulp van Claude (Claude Haiku)
 
-1. Create an API key at [console.anthropic.com](https://console.anthropic.com/settings/keys) (you pay per use; a plan costs a few cents).
-2. In the app tap the ⚙️ gear, paste the key, and save. It's stored **only on that device** (in the browser) and sent straight to Anthropic, never to GitHub or the public site.
-3. Open a task and tap **✨ Plan met Claude**. The plan streams in and is remembered on that device; tap **Opnieuw** for a fresh one.
+For every upcoming task Claude writes: what's being asked, a step plan with dates before the deadline, a worked-out **first version** (a full draft for text parts; for visual, audio or video work: concepts plus concrete steps in Illustrator/Photoshop/Audition/...), and a hand-in checklist.
 
-It uses Claude Opus 5.5 through the official Anthropic JavaScript SDK, loaded from jsDelivr the first time you use it. Check your course's rules on AI use.
+**Set up once:**
+
+1. Create an API key at [console.anthropic.com](https://console.anthropic.com/settings/keys) and add a little credit (Claude Haiku costs a fraction of a cent per task).
+2. Add it as repo secret **`ANTHROPIC_API_KEY`** (Settings → Secrets and variables → Actions).
+
+From then on every build prepares the help with `claude-haiku-5-5` and publishes it with the tasks, so the **✨ Hulp van Claude** button shows it instantly on any device. Answers are cached on the `state` branch (`help.json`) and only regenerated when a task's title, deadline or description changes.
+
+Optional: paste a key in the app's ⚙️ settings to get an answer on that device right away (for tasks the build hasn't done yet) or to tap **Opnieuw** for a fresh version. That key stays on the device.
+
+Note: the answers are published on your (public) site together with the tasks. Make the work your own and check your course's rules on AI use.
 
 ## Grade weights (`weights.json`)
 
@@ -129,6 +136,7 @@ Run the tests with `python -m unittest discover -s tests -t .`.
 | `LOOKAHEAD_DAYS` | `14` | How many days ahead to show and notify |
 | `TIMEZONE` | `Europe/Brussels` | Timezone for due dates |
 | `NOTIFY_DEFAULT_TIER` | `true` | Also notify for green (>7 days) tasks |
+| `ANTHROPIC_API_KEY` | – | Claude API key; the build prepares "Hulp van Claude" for every task with Claude Haiku |
 | `CANVAS_TOKEN` | – | Optional Canvas access token, only used to read your course colours (auto-detect yellow) |
 | `BASE_URL` | set by the workflow | Dashboard URL used as the tap-through link in notifications |
 

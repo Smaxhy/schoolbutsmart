@@ -20,13 +20,14 @@ from dotenv import load_dotenv
 
 from canvas_client import CanvasClient, FeedError, fetch_course_colors, is_yellow
 from notifier import HIGH_DAYS, URGENT_DAYS, Notifier, filter_upcoming
+from ai_helper import SYSTEM_PROMPT, add_help
 from weights import classify, load_weights
 
 log = logging.getLogger("build_site")
 
 PUBLIC_FIELDS = ("title", "section", "course", "course_short", "due_date", "description", "days_until_due",
                  "urgency", "url", "weight", "impact", "big", "big_rule", "big_reasons", "kind", "calendar",
-                 "calendar_type", "calendar_name", "color", "all_day", "duration_minutes")
+                 "calendar_type", "calendar_name", "color", "all_day", "duration_minutes", "help")
 
 
 def calendar_summary(tasks):
@@ -75,7 +76,7 @@ def app_version(web_dir):
     return digest.hexdigest()[:12]
 
 
-def build(out_dir, web_dir, state_file, notify=True, weights_file=None):
+def build(out_dir, web_dir, state_file, notify=True, weights_file=None, ai_cache=None):
     load_dotenv()
     feed_url = os.environ.get("ICAL_FEED_URL", "").strip()
     if not feed_url:
@@ -98,6 +99,11 @@ def build(out_dir, web_dir, state_file, notify=True, weights_file=None):
     tasks = filter_upcoming(all_tasks, lookahead)
 
     log_report(all_tasks, tasks)
+
+    # "Hulp van Claude": made here with Claude Haiku (ANTHROPIC_API_KEY secret), cached per task.
+    now = datetime.now(client.tz)
+    add_help(tasks, ai_cache or os.path.join(os.path.dirname(state_file) or ".", "help.json"),
+             os.environ.get("ANTHROPIC_API_KEY", "").strip(), now.strftime("%Y-%m-%d %H:%M"))
 
     sent = 0
     if notify:
@@ -134,6 +140,7 @@ def build(out_dir, web_dir, state_file, notify=True, weights_file=None):
         "calendars": [{k: c[k] for k in ("id", "type", "name", "short", "color", "yellow", "count", "examples")}
                       for c in calendar_summary(all_tasks) if c["id"]],
         "colors_known": bool(colors),
+        "ai_system_prompt": SYSTEM_PROMPT,
     }
     with open(os.path.join(out_dir, "tasks.json"), "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
@@ -148,12 +155,14 @@ def main(argv=None):
     parser.add_argument("--web", default=os.path.join(here, "web"))
     parser.add_argument("--state", default=os.path.join(here, "data", "notifications.json"))
     parser.add_argument("--weights", default=os.path.join(here, "weights.json"))
+    parser.add_argument("--ai-cache", default=None, help="where Claude's answers are cached (default: next to --state)")
     parser.add_argument("--no-notify", action="store_true")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     try:
-        build(args.out, args.web, args.state, notify=not args.no_notify, weights_file=args.weights)
+        build(args.out, args.web, args.state, notify=not args.no_notify, weights_file=args.weights,
+              ai_cache=args.ai_cache)
     except FeedError as exc:
         log.error("%s", exc)
         return 1

@@ -1,28 +1,15 @@
-// "Plan met Claude": asks Claude for a study plan for one assignment.
+// "Hulp van Claude" on the phone itself (only used when the build hasn't prepared an answer).
 // Runs entirely in the browser with the user's own API key (stored only on this device),
 // so the public GitHub Pages site never holds a key. The SDK is loaded on first use.
 
 const SDK_URL = "https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.127.0/+esm";
-const MODEL = "claude-opus-5-5";
+const MODEL = "claude-haiku-5-5";
 
-const SYSTEM_PROMPT = `Je bent een studiecoach voor een student aan Artevelde Hogeschool (Gent).
-Je krijgt één opdracht uit Canvas en helpt de student die zelf uit te voeren: je schrijft de opdracht niet voor hen.
-
-Antwoord in het Nederlands, kort en concreet (maximaal ongeveer 350 woorden), met precies deze kopjes:
-## Wat wordt er gevraagd
-2 tot 4 zinnen in gewone taal.
-## Stappenplan
-Genummerde stappen. Geef bij elke stap een geschatte tijd en een streefdatum vóór de deadline (reken vanaf vandaag).
-## Checklist voor het indienen
-## Zo begin je
-Eén concrete eerste stap van ongeveer 15 minuten, en waar nuttig een mogelijke structuur of opbouw.
-## Vragen voor je docent
-Alleen als iets in de opdracht echt onduidelijk is; laat dit kopje anders weg.
-
-Regels:
-- Baseer je alleen op de gegeven informatie. Verzin geen eisen, puntenverdeling of bronnen. Is de beschrijving mager, zeg dat dan en raad aan de opdracht in Canvas na te lezen.
-- Schrijf geen kant-en-klare tekst, code of antwoorden om in te dienen.
-- Gebruik alleen "## " voor kopjes, "- " of "1. " voor lijsten en **vet** voor nadruk. Geen tabellen.`;
+// Normally the build sends the same prompt it uses itself (tasks.json "ai_system_prompt").
+const FALLBACK_SYSTEM_PROMPT = `Je helpt een student van Artevelde Hogeschool met één opdracht uit Canvas.
+Antwoord in het Nederlands met de kopjes "## Wat wordt er gevraagd", "## Stappenplan" (met tijd en streefdatum per stap),
+"## Uitwerking" (een eerste versie van tekstdelen, of uitgewerkte concepten en concrete stappen in de software voor beeld/audio/video)
+en "## Checklist voor het indienen". Verzin geen eisen. Gebruik alleen "## ", "- ", "1. " en **vet**.`;
 
 let sdkPromise = null;
 
@@ -67,19 +54,17 @@ function friendlyError(err) {
 /**
  * Stream a study plan. Calls onText(fullTextSoFar) as text arrives; resolves with the final text.
  */
-export async function streamPlan(task, apiKey, { onText, signal, today }) {
+export async function streamPlan(task, apiKey, { onText, signal, today, system }) {
   try {
     const { default: Anthropic } = await loadSdk();
     const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true, maxRetries: 1 });
 
-    const stream = client.beta.messages.stream(
+    const stream = client.messages.stream(
       {
         model: MODEL,
-        max_tokens: 16000,
+        max_tokens: 8000,
         output_config: { effort: "medium" },
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
-        system: SYSTEM_PROMPT,
+        system: system || FALLBACK_SYSTEM_PROMPT,
         messages: [{ role: "user", content: buildPrompt(task, today) }],
       },
       { signal },
