@@ -18,6 +18,7 @@ import anthropic
 log = logging.getLogger(__name__)
 
 MODEL = "claude-haiku-5-5"
+FALLBACK_MODEL = "claude-haiku-4-5"  # for accounts without access to Haiku 5.5 (HTTP 404)
 PROMPT_VERSION = "3"  # bump to regenerate everything after changing the prompt
 MAX_NEW_PER_RUN = 25
 
@@ -91,13 +92,14 @@ def save_cache(path, cache):
 
 def ask_claude(client, task, today):
     """One Haiku call; returns the answer text, or None if Claude declined."""
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=16000,
-        output_config={"effort": "medium"},
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": build_prompt(task, today)}],
-    )
+    messages = [{"role": "user", "content": build_prompt(task, today)}]
+    try:
+        response = client.messages.create(model=MODEL, max_tokens=16000, output_config={"effort": "medium"},
+                                          system=SYSTEM_PROMPT, messages=messages)
+    except anthropic.NotFoundError:
+        log.warning("%s not available for this key, using %s", MODEL, FALLBACK_MODEL)
+        response = client.messages.create(model=FALLBACK_MODEL, max_tokens=16000,
+                                          system=SYSTEM_PROMPT, messages=messages)
     if response.stop_reason == "refusal":
         log.warning("Claude declined to help with one task")
         return None
@@ -127,7 +129,8 @@ def add_help(tasks, cache_path, api_key, today, client=None):
                 log.error("ANTHROPIC_API_KEY is invalid; skipping Claude help")
                 break
             except anthropic.APIStatusError as exc:
-                log.warning("Claude request failed (HTTP %s); will retry next run", exc.status_code)
+                detail = ((exc.body or {}).get("error") or {}).get("message", "") if isinstance(exc.body, dict) else ""
+                log.warning("Claude request failed (HTTP %s: %s); will retry next run", exc.status_code, detail)
                 if exc.status_code == 429 or "credit" in str(exc.message).lower():
                     break
                 continue

@@ -363,3 +363,18 @@ class AiHelperTests(unittest.TestCase):
         client.messages.create.side_effect = anthropic.AuthenticationError("bad key", response=resp, body=None)
         self.assertEqual(ai_helper.add_help(self.tasks(), self.cache, "key", "x", client=client), 0)
         self.assertEqual(client.messages.create.call_count, 1)
+
+    def test_falls_back_to_haiku_45(self):
+        import types
+        import anthropic
+        import httpx2 as httpx
+        import ai_helper
+        ok = types.SimpleNamespace(stop_reason="end_turn", content=[types.SimpleNamespace(type="text", text="Klaar.")])
+        resp = httpx.Response(404, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+        client = mock.Mock()
+        client.messages.create.side_effect = [anthropic.NotFoundError("model", response=resp, body=None), ok, ok]
+        tasks = self.tasks()
+        self.assertEqual(ai_helper.add_help(tasks, self.cache, "key", "x", client=client), 2)
+        models = [c.kwargs["model"] for c in client.messages.create.call_args_list]
+        self.assertEqual(models[:2], ["claude-haiku-5-5", "claude-haiku-4-5"])
+        self.assertNotIn("output_config", client.messages.create.call_args_list[1].kwargs)
