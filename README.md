@@ -5,7 +5,7 @@ A small app that runs entirely on GitHub (Actions + Pages) and reads your assign
 - Python script run every 30 minutes by GitHub Actions, vanilla HTML/CSS/JS frontend on GitHub Pages, installable as a PWA. No server to host or keep awake.
 - Tap a task to see the full details: what you need to do, the exact deadline, its grade weight, and an **Open in Canvas** button.
 - **Grote taken** (big tasks) get their own section and tab. They're detected automatically from the title and description (exams, projects, papers, portfolios, "telt voor 30% van het eindcijfer", ...) and from your own `weights.json`.
-- **✨ Hulp van Claude**: for every task, Claude Haiku prepares a step plan and a worked-out first version, ready the moment you tap the button.
+- **✍️ Claude makes your tasks**: Claude Haiku makes each task as far as it can, and you can prompt it per task for changes.
 - Tasks grouped by week ("Deze week", "Volgende week", "Later"), colour-coded by urgency:
   - 🔴 due within 2 days (ntfy priority 5)
   - 🟠 due within 7 days (priority 4)
@@ -76,20 +76,15 @@ Words in the description are deliberately ignored: course templates mention "exa
 
 The detail view lists why a task counts as big. Each Actions run also logs a per-course overview (items, colour, yellow or not) so you can check the detection.
 
-## ✨ Hulp van Claude (Claude Haiku)
+## ✍️ Claude makes your tasks (Claude Haiku)
 
-For every upcoming task Claude writes: what's being asked, a step plan with dates before the deadline, a worked-out **first version** (a full draft for text parts; for visual, audio or video work: concepts plus concrete steps in Illustrator/Photoshop/Audition/...), and a hand-in checklist.
+For every upcoming task Claude Haiku (`claude-haiku-5-5`) makes the work as far as it can: everything that can be text is written out in full (journal, reflection, script, voice-over, text with an image), and for what it can't make itself (drawing, photos, recording, editing) you get the chosen concept with exact steps in the right software, plus a hand-in checklist. Personal texts get `[vul aan: ...]` markers where your own experience goes.
 
-**Set up once:**
+**Automatic (set up once):** add an API key from [console.anthropic.com](https://console.anthropic.com/settings/keys) as repo secret **`ANTHROPIC_API_KEY`**. Every build then makes new or changed tasks and publishes the result with the tasks (cached in `help.json` on the `state` branch, so each task is sent once). Open a task and tap **✨ Wat Claude maakte**.
 
-1. Create an API key at [console.anthropic.com](https://console.anthropic.com/settings/keys) and add a little credit (Claude Haiku costs a fraction of a cent per task).
-2. Add it as repo secret **`ANTHROPIC_API_KEY`** (Settings → Secrets and variables → Actions).
+**Your own prompts:** under each task there's a prompt box and quick buttons (*Maak alles volledig af*, *Schrijf het persoonlijker*, *Geef 3 andere ideeën*, *Maak het korter*). Type anything, e.g. "schrijf het over mijn oma" or paste the full briefing from Canvas. Claude answers with the complete adjusted result. This runs on your phone and needs the API key pasted once in the task (it stays on that device). Each answer has a **Kopieer** button.
 
-From then on every build prepares the help with `claude-haiku-5-5` and publishes it with the tasks, so the **✨ Hulp van Claude** button shows it instantly on any device. Answers are cached on the `state` branch (`help.json`) and only regenerated when a task's title, deadline or description changes.
-
-Optional: paste a key in the app's ⚙️ settings to get an answer on that device right away (for tasks the build hasn't done yet) or to tap **Opnieuw** for a fresh version. That key stays on the device.
-
-Note: the answers are published on your (public) site together with the tasks. Make the work your own and check your course's rules on AI use.
+Claude only knows what's in the calendar description; when that's empty, paste the briefing into the prompt box. The automatic results are published on your public site together with the tasks. Read what Claude made, make it your own, and check what your course allows for AI use.
 
 ## Grade weights (`weights.json`)
 
@@ -136,7 +131,7 @@ Run the tests with `python -m unittest discover -s tests -t .`.
 | `LOOKAHEAD_DAYS` | `14` | How many days ahead to show and notify |
 | `TIMEZONE` | `Europe/Brussels` | Timezone for due dates |
 | `NOTIFY_DEFAULT_TIER` | `true` | Also notify for green (>7 days) tasks |
-| `ANTHROPIC_API_KEY` | – | Claude API key; the build prepares "Hulp van Claude" for every task with Claude Haiku |
+| `ANTHROPIC_API_KEY` | – | Claude API key; the build has Claude Haiku make every new task |
 | `CANVAS_TOKEN` | – | Optional Canvas access token, only used to read your course colours (auto-detect yellow) |
 | `BASE_URL` | set by the workflow | Dashboard URL used as the tap-through link in notifications |
 

@@ -18,31 +18,29 @@ import anthropic
 log = logging.getLogger(__name__)
 
 MODEL = "claude-haiku-5-5"
-PROMPT_VERSION = "2"  # bump to regenerate everything after changing the prompt
+PROMPT_VERSION = "3"  # bump to regenerate everything after changing the prompt
 MAX_NEW_PER_RUN = 25
 
 WEEKDAYS = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"]
 MONTHS = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus",
           "september", "oktober", "november", "december"]
 
-SYSTEM_PROMPT = """Je helpt een student van Artevelde Hogeschool (Gent) met één opdracht uit Canvas.
-Doel: dat de student meteen aan de slag kan en de opdracht goed afwerkt.
+SYSTEM_PROMPT = """Je bent de assistent van een student van Artevelde Hogeschool (Gent). Je maakt de opdracht uit Canvas zo volledig mogelijk voor de student.
 
-Antwoord in het Nederlands met precies deze kopjes:
+Antwoord in het Nederlands met deze kopjes:
 ## Wat wordt er gevraagd
-2 tot 4 zinnen in gewone taal.
-## Stappenplan
-Genummerde stappen, elk met een geschatte tijd en een streefdatum vóór de deadline (reken vanaf vandaag).
-## Uitwerking
-Maak het werk zo concreet mogelijk:
-- Is (een deel van) de opdracht tekst (journal, reflectie, verslag, tekst bij een beeld)? Schrijf een volledige eerste versie die de student kan aanpassen.
-- Is het beeld, illustratie, foto, audio of video? Geef 2 tot 3 uitgewerkte concepten en daarna voor het beste concept de concrete uitvoering: compositie, kleuren, opbouw, en de stappen in de juiste software (bijvoorbeeld Illustrator, Photoshop, InDesign, Audition, Premiere), of een script/shotlist.
+1 tot 3 zinnen.
+## Klaar om in te dienen
+Maak alles wat in tekst kan volledig af, op het niveau van een goede student: de tekst, het journal, de reflectie, de uitleg, het script of de voice-over, de tekst bij een beeld, de presentatietekst. Geen opzet of samenvatting, maar het eindresultaat.
+## Zo maak je de rest
+Voor wat jij niet kunt maken (tekenen, fotograferen, opnemen, monteren, opmaken): het gekozen concept en de exacte stappen in de juiste software (gereedschap, instellingen, lagen, formaat, export), zodat de student het meteen kan uitvoeren. Laat dit kopje weg als alles al klaar is.
 ## Checklist voor het indienen
 
 Regels:
-- Baseer je op de gegeven informatie. Verzin geen eisen, puntenverdeling of bronnen; is de beschrijving mager, zeg dat en raad aan de briefing in Canvas na te lezen.
-- Gebruik alleen "## " voor kopjes, "- " of "1. " voor lijsten en **vet** voor nadruk. Geen tabellen.
-- Maximaal ongeveer 600 woorden."""
+- Gebruik wat in de beschrijving staat. Ontbreekt er iets, maak dan een redelijke keuze en zeg in één zin welke. Verzin geen beoordelingscriteria.
+- Vraagt de opdracht een persoonlijke tekst, schrijf dan in de ik-vorm en markeer met [vul aan: ...] waar de student een eigen ervaring of detail moet invullen.
+- Vraagt de student daarna iets of wil die een aanpassing, voer het uit en geef het volledige aangepaste resultaat.
+- Gebruik alleen "## " voor kopjes, "- " of "1. " voor lijsten en **vet** voor nadruk. Geen tabellen."""
 
 
 def _format_due(iso):
@@ -95,7 +93,7 @@ def ask_claude(client, task, today):
     """One Haiku call; returns the answer text, or None if Claude declined."""
     response = client.messages.create(
         model=MODEL,
-        max_tokens=8000,
+        max_tokens=16000,
         output_config={"effort": "medium"},
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": build_prompt(task, today)}],

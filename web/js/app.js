@@ -280,108 +280,193 @@
 
   // ---- Claude plan ------------------------------------------------------
 
+  // ---- Claude: make the task, then your own prompts --------------------------
+  // The conversation per task is: the task itself, Claude's first answer (prepared by the
+  // build, or made here), then whatever you ask. Kept on this device.
+
+  const CHAT_PREFIX = "artevelde-tasks-chat:";
+  const QUICK_PROMPTS = ["Maak alles volledig af", "Schrijf het persoonlijker", "Geef 3 andere ideeën", "Maak het korter"];
+
+  const chatKey = (task) => `${CHAT_PREFIX}${task.course}|${task.title}|${task.due_date}`;
+
+  function loadChat(task) {
+    try {
+      const turns = JSON.parse(storageGet(chatKey(task)));
+      return Array.isArray(turns) ? turns : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveChat(task, turns) {
+    storageSet(chatKey(task), JSON.stringify(turns.slice(-30)));
+  }
+
+  const firstAnswer = (task) => storageGet(planKey(task)) || task.help || "";
+
+  function assistantMessage(text, { live = false } = {}) {
+    const msg = el("div", "ai-msg");
+    const body = el("div", "ai-body");
+    if (text) renderMarkdown(body, text);
+    else body.append(el("p", "thinking", "Claude is bezig"));
+    msg.append(body);
+    if (text && !live && navigator.clipboard) {
+      const copy = el("button", "copy-btn", "Kopieer");
+      copy.type = "button";
+      copy.addEventListener("click", () => {
+        navigator.clipboard.writeText(text).then(() => { copy.textContent = "Gekopieerd ✓"; }, () => {});
+      });
+      msg.append(copy);
+    }
+    return msg;
+  }
+
+  function keyForm(task, box) {
+    const form = el("div", "key-form");
+    form.append(el("p", null, "Om Claude zelf iets te vragen, plak je één keer je Anthropic API-sleutel. Hij blijft alleen op dit toestel."));
+    const input = el("input");
+    input.type = "password";
+    input.placeholder = "sk-ant-…";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    const save = el("button", "btn primary", "Opslaan");
+    save.type = "button";
+    save.addEventListener("click", () => {
+      const key = input.value.trim();
+      if (!key) return input.focus();
+      storageSet(API_KEY_KEY, key);
+      renderHelp(task, box);
+    });
+    const row = el("div", "row");
+    row.append(input, save);
+    const hint = el("p", "muted small");
+    hint.append("Nog geen sleutel? Maak er een op ", linkOut(el("a", null, "console.anthropic.com"), "https://console.anthropic.com/settings/keys"),
+      ". Zet hem ook als secret ANTHROPIC_API_KEY in ", linkOut(el("a", null, "GitHub"), secretsUrl()),
+      ", dan maakt Claude elke nieuwe taak automatisch.");
+    form.append(row, hint);
+    return form;
+  }
+
+  function composer(task, box, hasFirst, busy) {
+    const wrap = el("div", "composer");
+    if (!storageGet(API_KEY_KEY)) {
+      wrap.append(keyForm(task, box));
+      return wrap;
+    }
+    if (busy) {
+      const stop = el("button", "btn", "Stop");
+      stop.type = "button";
+      stop.addEventListener("click", () => planAbort && planAbort.abort());
+      wrap.append(stop);
+      return wrap;
+    }
+    if (!hasFirst) {
+      const make = el("button", "btn claude", "✍️ Maak deze taak");
+      make.type = "button";
+      make.addEventListener("click", () => sendToClaude(task, box, ""));
+      wrap.append(make);
+      return wrap;
+    }
+    const chips = el("div", "chips");
+    QUICK_PROMPTS.forEach((q) => {
+      const chip = el("button", "chip-btn", q);
+      chip.type = "button";
+      chip.addEventListener("click", () => sendToClaude(task, box, q));
+      chips.append(chip);
+    });
+    const area = el("textarea");
+    area.rows = 2;
+    area.placeholder = task.description
+      ? "Vraag Claude iets over deze taak… (bv. schrijf het over mijn oma)"
+      : "Plak hier de briefing uit Canvas, dan maakt Claude de taak volledig…";
+    const send = el("button", "btn claude", "Stuur");
+    send.type = "button";
+    const go = () => {
+      const text = area.value.trim();
+      if (text) sendToClaude(task, box, text);
+    };
+    send.addEventListener("click", go);
+    area.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) go();
+    });
+    const row = el("div", "row ask");
+    row.append(area, send);
+    wrap.append(chips, row);
+    return wrap;
+  }
+
+  function renderHelp(task, box, { live = null, error = null, pending = null } = {}) {
+    box.replaceChildren();
+    box.hidden = false;
+    const head = el("div", "ai-head");
+    head.append(el("strong", null, "✨ Claude"));
+    box.append(head);
+
+    const first = firstAnswer(task);
+    if (first) box.append(assistantMessage(first));
+    loadChat(task).forEach((turn) => {
+      box.append(turn.role === "user" ? el("p", "user-msg", turn.content) : assistantMessage(turn.content));
+    });
+    if (pending) box.append(el("p", "user-msg", pending));
+    if (live !== null) box.append(assistantMessage(live, { live: true }));
+    if (!first && live === null && !error) box.append(el("p", "muted", "Claude heeft deze taak nog niet gemaakt."));
+    if (error) box.append(el("p", "status error", error));
+    box.append(composer(task, box, Boolean(first), live !== null));
+    if (first || loadChat(task).length) {
+      box.append(el("p", "ai-note", "Gemaakt door Claude Haiku. Lees het na, maak het je eigen en check wat je vak toelaat over AI-gebruik."));
+    }
+  }
+
+  async function sendToClaude(task, box, text) {
+    const apiKey = storageGet(API_KEY_KEY);
+    if (!apiKey) return renderHelp(task, box);
+    if (planAbort) planAbort.abort();
+    const controller = new AbortController();
+    planAbort = controller;
+
+    const now = new Date();
+    const due = wallClock(task.due_date);
+    const first = firstAnswer(task);
+    const turns = loadChat(task);
+    let live = "";
+    renderHelp(task, box, { live, pending: text || null });
+
+    try {
+      const { streamChat, taskPrompt } = await import(`./claude.js?v=${APP_VERSION}`);
+      const messages = [{ role: "user", content: taskPrompt(task, `${formatLong(now)} ${formatTime(now)}`, `${formatLong(due)} om ${formatTime(due)}`) }];
+      if (first) messages.push({ role: "assistant", content: first });
+      turns.forEach((t) => messages.push({ role: t.role, content: t.content }));
+      if (text) messages.push({ role: "user", content: text });
+
+      const answer = await streamChat({
+        apiKey,
+        system: current && current.ai_system_prompt,
+        messages,
+        signal: controller.signal,
+        onText: (t) => {
+          live = t;
+          if (planAbort === controller) renderHelp(task, box, { live, pending: text || null });
+        },
+      });
+      if (!first && !text) {
+        storageSet(planKey(task), answer); // Claude's own first answer, made on this device
+      } else {
+        saveChat(task, [...turns, { role: "user", content: text }, { role: "assistant", content: answer }]);
+      }
+      if (planAbort === controller) renderHelp(task, box);
+    } catch (err) {
+      if (planAbort === controller) renderHelp(task, box, { error: (err && err.message) || "Er ging iets mis." });
+    } finally {
+      if (planAbort === controller) planAbort = null;
+      if (reloadPending) setTimeout(() => reloadPending && reloadSoon(), 500);
+    }
+  }
+
   // Where the repo's Actions secrets live, derived from <user>.github.io/<repo>/.
   function secretsUrl() {
     const user = location.hostname.endsWith(".github.io") ? location.hostname.split(".")[0] : "";
     const repo = location.pathname.split("/").filter(Boolean)[0] || "";
     return user && repo ? `https://github.com/${user}/${repo}/settings/secrets/actions` : "https://github.com";
-  }
-
-  function renderSetupHelp(box, task) {
-    box.replaceChildren();
-    box.hidden = false;
-    const head = el("div", "ai-head");
-    head.append(el("strong", null, "✨ Hulp van Claude"));
-    box.append(head);
-    const body = el("div", "ai-body");
-    body.append(el("p", null, "Claude maakt voor elke taak automatisch een stappenplan en een uitwerking, maar heeft daarvoor één keer je Anthropic API-sleutel nodig."));
-    const ol = el("ol");
-    const li1 = el("li");
-    li1.append("Maak een sleutel op ", linkOut(el("a", null, "console.anthropic.com"), "https://console.anthropic.com/settings/keys"), ".");
-    const li2 = el("li");
-    li2.append("Zet hem als secret ", el("strong", null, "ANTHROPIC_API_KEY"), " in ", linkOut(el("a", null, "GitHub → Secrets"), secretsUrl()), ".");
-    ol.append(li1, li2, el("li", null, "Binnen 30 minuten staat de hulp bij al je taken klaar."));
-    body.append(ol);
-    box.append(body);
-    const row = el("div", "row");
-    const local = el("button", "btn", "Nu meteen: sleutel op dit toestel");
-    local.type = "button";
-    local.addEventListener("click", openSettings);
-    row.append(local);
-    box.append(row);
-  }
-
-  // Order: an answer made on this device, the one prepared by the build, a live answer
-  // with this device's key, or instructions to set it up.
-  function showHelp(task, box) {
-    const local = storageGet(planKey(task));
-    if (local) return renderPlanBox(box, task, local);
-    if (task.help) return renderPlanBox(box, task, task.help);
-    if (storageGet(API_KEY_KEY)) return runPlan(task, box);
-    return renderSetupHelp(box, task);
-  }
-
-  function renderPlanBox(box, task, text, { streaming = false, error = null } = {}) {
-    box.replaceChildren();
-    box.hidden = false;
-    const head = el("div", "ai-head");
-    head.append(el("strong", null, "✨ Hulp van Claude"));
-    if (streaming) {
-      const stop = el("button", null, "Stop");
-      stop.type = "button";
-      stop.addEventListener("click", () => planAbort && planAbort.abort());
-      head.append(stop);
-    } else if (text && storageGet(API_KEY_KEY)) {
-      const again = el("button", null, "Opnieuw");
-      again.type = "button";
-      again.addEventListener("click", () => runPlan(task, box));
-      head.append(again);
-    }
-    box.append(head);
-
-    const body = el("div", "ai-body");
-    if (text) renderMarkdown(body, text);
-    else if (streaming) body.append(el("p", "thinking", "Claude denkt na"));
-    box.append(body);
-
-    if (error) box.append(el("p", "status error", error));
-    if (!streaming && text) {
-      box.append(el("p", "ai-note", "Gemaakt door Claude Haiku. Maak het je eigen en check wat je vak toelaat over AI-gebruik."));
-    }
-  }
-
-  async function runPlan(task, box) {
-    const apiKey = storageGet(API_KEY_KEY);
-    if (!apiKey) return renderSetupHelp(box, task);
-    if (planAbort) planAbort.abort();
-    const controller = new AbortController();
-    planAbort = controller;
-    box.hidden = false;
-    renderPlanBox(box, task, "", { streaming: true });
-
-    let latest = "";
-    try {
-      const { streamPlan } = await import(`./claude.js?v=${APP_VERSION}`);
-      const now = new Date();
-      latest = await streamPlan(task, apiKey, {
-        signal: controller.signal,
-        system: current && current.ai_system_prompt,
-        today: `${formatLong(now)} ${formatTime(now)}`,
-        onText: (text) => {
-          latest = text;
-          if (planAbort === controller) renderPlanBox(box, task, text, { streaming: true });
-        },
-      });
-      storageSet(planKey(task), latest);
-      if (planAbort === controller) renderPlanBox(box, task, latest);
-    } catch (err) {
-      if (planAbort === controller) {
-        renderPlanBox(box, task, latest, { error: (err && err.message) || "Er ging iets mis." });
-      }
-    } finally {
-      if (planAbort === controller) planAbort = null;
-      if (reloadPending) setTimeout(() => reloadPending && reloadSoon(), 500);
-    }
   }
 
   // ---- detail sheet -----------------------------------------------------
@@ -425,7 +510,8 @@
     inner.append(body);
 
     const actions = el("div", "row");
-    const planBtn = el("button", "btn claude", task.help ? "✨ Hulp van Claude" : "✨ Vraag Claude");
+    const made = Boolean(firstAnswer(task));
+    const planBtn = el("button", "btn claude", made ? "✨ Wat Claude maakte" : "✍️ Maak met Claude");
     planBtn.type = "button";
     actions.append(planBtn);
     if (task.url && /^https?:\/\//i.test(task.url)) {
@@ -437,15 +523,12 @@
     planBox.hidden = true;
     inner.append(planBox);
     planBtn.addEventListener("click", () => {
-      showHelp(task, planBox);
+      // One tap: show what Claude made, or let Claude make it now.
+      if (!firstAnswer(task) && storageGet(API_KEY_KEY)) sendToClaude(task, planBox, "");
+      else renderHelp(task, planBox);
       planBox.scrollIntoView({ behavior: "smooth", block: "start" });
     });
-
-    const saved = storageGet(planKey(task));
-    if (saved) {
-      planBox.hidden = false;
-      renderPlanBox(planBox, task, saved);
-    }
+    if (made || loadChat(task).length) renderHelp(task, planBox);
 
     detailEl.replaceChildren(inner);
     if (!detailEl.open) detailEl.showModal();
