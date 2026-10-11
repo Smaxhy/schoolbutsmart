@@ -5,7 +5,7 @@ A small app that runs entirely on GitHub (Actions + Pages) and reads your assign
 - Python script run every 30 minutes by GitHub Actions, vanilla HTML/CSS/JS frontend on GitHub Pages, installable as a PWA. No server to host or keep awake.
 - Tap a task to see the full details: what you need to do, the exact deadline, its grade weight, and an **Open in Canvas** button.
 - **Grote taken** (big tasks) get their own section and tab. They're detected automatically from the title and description (exams, projects, papers, portfolios, "telt voor 30% van het eindcijfer", ...) and from your own `weights.json`.
-- **✨ Plan met Claude**: one tap and Claude writes a study plan for an assignment: what's asked, steps with dates before the deadline, a hand-in checklist and how to start. It plans with you; it doesn't write the assignment for you.
+- **✍️ Claude makes your tasks**: Claude Haiku makes each task as far as it can, and you can prompt it per task for changes.
 - Tasks grouped by week ("Deze week", "Volgende week", "Later"), colour-coded by urgency:
   - 🔴 due within 2 days (ntfy priority 5)
   - 🟠 due within 7 days (priority 4)
@@ -76,13 +76,15 @@ Words in the description are deliberately ignored: course templates mention "exa
 
 The detail view lists why a task counts as big. Each Actions run also logs a per-course overview (items, colour, yellow or not) so you can check the detection.
 
-## ✨ Plan met Claude
+## ✍️ Claude makes your tasks (Claude Haiku)
 
-1. Create an API key at [console.anthropic.com](https://console.anthropic.com/settings/keys) (you pay per use; a plan costs a few cents).
-2. In the app tap the ⚙️ gear, paste the key, and save. It's stored **only on that device** (in the browser) and sent straight to Anthropic, never to GitHub or the public site.
-3. Open a task and tap **✨ Plan met Claude**. The plan streams in and is remembered on that device; tap **Opnieuw** for a fresh one.
+For every upcoming task Claude Haiku (`claude-haiku-5-5`) makes the work as far as it can: everything that can be text is written out in full (journal, reflection, script, voice-over, text with an image), and for what it can't make itself (drawing, photos, recording, editing) you get the chosen concept with exact steps in the right software, plus a hand-in checklist. Personal texts get `[vul aan: ...]` markers where your own experience goes.
 
-It uses Claude Opus 5.5 through the official Anthropic JavaScript SDK, loaded from jsDelivr the first time you use it. Check your course's rules on AI use.
+**Automatic (set up once):** add an API key from [console.anthropic.com](https://console.anthropic.com/settings/keys) as repo secret **`ANTHROPIC_API_KEY`**. Every build then makes new or changed tasks and publishes the result with the tasks (cached in `help.json` on the `state` branch, so each task is sent once). Open a task and tap **✨ Wat Claude maakte**.
+
+**Your own prompts:** under each task there's a prompt box and quick buttons (*Maak alles volledig af*, *Schrijf het persoonlijker*, *Geef 3 andere ideeën*, *Maak het korter*). Type anything, e.g. "schrijf het over mijn oma" or paste the full briefing from Canvas. Claude answers with the complete adjusted result. This runs on your phone and needs the API key pasted once in the task (it stays on that device). Each answer has a **Kopieer** button.
+
+Claude only knows what's in the calendar description; when that's empty, paste the briefing into the prompt box. The automatic results are published on your public site together with the tasks. Read what Claude made, make it your own, and check what your course allows for AI use.
 
 ## Grade weights (`weights.json`)
 
@@ -129,6 +131,7 @@ Run the tests with `python -m unittest discover -s tests -t .`.
 | `LOOKAHEAD_DAYS` | `14` | How many days ahead to show and notify |
 | `TIMEZONE` | `Europe/Brussels` | Timezone for due dates |
 | `NOTIFY_DEFAULT_TIER` | `true` | Also notify for green (>7 days) tasks |
+| `ANTHROPIC_API_KEY` | – | Claude API key; the build has Claude Haiku make every new task |
 | `CANVAS_TOKEN` | – | Optional Canvas access token, only used to read your course colours (auto-detect yellow) |
 | `BASE_URL` | set by the workflow | Dashboard URL used as the tap-through link in notifications |
 
