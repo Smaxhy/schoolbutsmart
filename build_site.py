@@ -89,6 +89,13 @@ def build(out_dir, web_dir, state_file, notify=True, weights_file=None, ai_cache
     # Optional: your Canvas calendar colours, to find the yellow courses automatically.
     colors = fetch_course_colors(feed_url, os.environ.get("CANVAS_TOKEN", "").strip())
     yellow = {cal for cal, color in colors.items() if is_yellow(color)}
+    # BIG_COURSES (repo variable, e.g. "MOT1, STORY1"): your yellow courses, named by hand.
+    wanted = {w.strip().lower() for w in os.environ.get("BIG_COURSES", "").split(",") if w.strip()}
+    if wanted:
+        for t in all_tasks:
+            names = {t["calendar"].lower(), (t.get("course_short") or "").lower(), (t.get("course") or "").lower()}
+            if t["calendar"] and names & wanted:
+                yellow.add(t["calendar"])
     log.info("Canvas colours: %d known, yellow calendars: %s", len(colors), sorted(yellow) or "none")
 
     weights = load_weights(weights_file or "")
@@ -113,6 +120,7 @@ def build(out_dir, web_dir, state_file, notify=True, weights_file=None, ai_cache
             dashboard_url=os.environ.get("BASE_URL", ""),
             server=os.environ.get("NTFY_SERVER") or "https://ntfy.sh",
             notify_default_tier=_bool_env("NOTIFY_DEFAULT_TIER", True),
+            only_big=_bool_env("NOTIFY_ONLY_BIG", True),
         )
         sent = notifier.notify_new_tiers(tasks)
 

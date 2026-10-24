@@ -386,3 +386,58 @@ class AiHelperTests(unittest.TestCase):
             cls.return_value = self.fake_client()
             ai_helper.add_help(self.tasks()[:1], self.cache, "key", "x")
         self.assertEqual(cls.call_args.kwargs["default_headers"], {"anthropic-workspace-id": "wrkspc_123"})
+
+
+class BigNotificationTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.session = mock.Mock()
+        self.notifier = Notifier("topic", os.path.join(self.dir.name, "state.json"),
+                                 session=self.session, only_big=True)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def task(self, uid, days, big):
+        return {"uid": uid, "title": f"Taak {uid}", "course": "PBAGDM - MOT1 - Semester 1", "course_short": "MOT1",
+                "days_until_due": days, "urgency": urgency_for(days), "due_date": "2026-10-30T23:59:00+01:00",
+                "big": big, "big_reasons": [{"type": "title", "text": "Titel: 'tussentijds'"}] if big else []}
+
+    def test_only_big_tasks_and_three_moments(self):
+        n = self.notifier
+        self.assertEqual(n.notify_new_tiers([self.task("big", 12, True), self.task("small", 1, False)]), 1)
+        headers = self.session.post.call_args.kwargs["headers"]
+        body = self.session.post.call_args.kwargs["data"].decode()
+        self.assertIn("Nieuwe grote taak", base64_title(headers["Title"]))
+        self.assertTrue(headers["Tags"].startswith("star,"))
+        self.assertIn("MOT1", body)
+        self.assertIn("tussentijds", body)
+        self.assertEqual(n.notify_new_tiers([self.task("big", 12, True)]), 0)   # no repeat
+        self.assertEqual(n.notify_new_tiers([self.task("big", 6, True)]), 1)    # a week away
+        self.assertIn("nog een week", base64_title(self.session.post.call_args.kwargs["headers"]["Title"]))
+        self.assertEqual(n.notify_new_tiers([self.task("big", 2, True)]), 1)    # two days before
+        self.assertEqual(self.session.post.call_count, 3)
+
+    def test_big_courses_variable(self):
+        import build_site
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"ICAL_FEED_URL": "https://canvas.example/f.ics", "NTFY_TOPIC": "",
+                                             "BIG_COURSES": "Webontwikkeling 2"}), \
+                mock.patch.object(CanvasClient, "_download", lambda self: shifted_ics().replace(
+                    b"URL:https://canvas.example/assignments/1",
+                    b"URL:https://canvas.example/calendar?include_contexts=course_7&month=10#assignment_1")):
+            data = build_site.build(os.path.join(tmp, "site"), os.path.join(os.path.dirname(__file__), "..", "web"),
+                                    os.path.join(tmp, "state.json"))
+        first = data["tasks"][0]
+        self.assertEqual(first["calendar"], "course_7")
+        self.assertTrue(first["big"])
+        self.assertEqual(first["big_reasons"][0]["type"], "yellow")
+        self.assertTrue(data["calendars"][0]["yellow"])
+
+
+def base64_title(value):
+    """Decode ntfy's RFC 2047 encoded-word titles for assertions."""
+    import base64
+    if value.startswith("=?UTF-8?B?"):
+        return base64.b64decode(value[10:-2]).decode("utf-8")
+    return value

@@ -46,6 +46,8 @@ jobs:
           ANTHROPIC_WORKSPACE_ID: ${{ secrets.ANTHROPIC_WORKSPACE_ID || vars.ANTHROPIC_WORKSPACE_ID }}
           LOOKAHEAD_DAYS: ${{ vars.LOOKAHEAD_DAYS }}
           NOTIFY_DEFAULT_TIER: ${{ vars.NOTIFY_DEFAULT_TIER }}
+          NOTIFY_ONLY_BIG: ${{ vars.NOTIFY_ONLY_BIG }}
+          BIG_COURSES: ${{ vars.BIG_COURSES }}
           BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
         # Test runs on other branches only build; notifications and publishing stay on main.
         run: python build_site.py --state state/notifications.json ${{ github.ref != 'refs/heads/main' && '--no-notify' || '' }}
