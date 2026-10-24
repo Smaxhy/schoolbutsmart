@@ -7,6 +7,7 @@
   const WORKSPACE_KEY = "artevelde-tasks-anthropic-workspace";
   const PLAN_PREFIX = "artevelde-tasks-plan:";
   const YELLOW_KEY = "artevelde-tasks-yellow-calendars";
+  const PUSH_KEY = "artevelde-tasks-push"; // {key, sentAt} once this phone is subscribed
   const RELOADED_KEY = "artevelde-tasks-reloaded-for";
   const POLL_MS = 5 * 60 * 1000;
   const APP_VERSION = (document.querySelector('meta[name="app-version"]') || {}).content || "dev";
@@ -246,6 +247,7 @@
         if (box2.checked) next.add(cal.id);
         else next.delete(cal.id);
         storageSet(YELLOW_KEY, JSON.stringify([...next]));
+        refreshPushRegistration(true); // tell the build which courses are yellow
         $("picker-auto").hidden = true;
         render(current);
       });
@@ -263,6 +265,7 @@
     apiKeyInput.value = storageGet(API_KEY_KEY) || "";
     $("workspace-id").value = storageGet(WORKSPACE_KEY) || "";
     renderCalendarPicker();
+    updatePushUi();
     settingsEl.showModal();
     settingsEl.scrollTop = 0;
   }
@@ -711,6 +714,125 @@
     statusEl.hidden = !message;
   }
 
+  // ---- notifications (Web Push) -----------------------------------------
+  // Tapping "Aanzetten" subscribes this phone; the subscription (plus your yellow courses)
+  // goes to a mailbox the GitHub build reads, and the build sends the pushes.
+
+  const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+
+  function pushInfo() {
+    try {
+      return JSON.parse(storageGet(PUSH_KEY)) || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function b64urlToBytes(value) {
+    const pad = "=".repeat((4 - (value.length % 4)) % 4);
+    const raw = atob((value + pad).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+  }
+
+  async function postToMailbox(body) {
+    const cfg = current && current.push;
+    if (!cfg) throw new Error("no push config");
+    const resp = await fetch(`${cfg.mailbox}/${cfg.topic}`, { method: "POST", body: JSON.stringify(body) });
+    if (!resp.ok) throw new Error(`mailbox HTTP ${resp.status}`);
+  }
+
+  async function subscribeThisPhone() {
+    const cfg = current && current.push;
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    const info = pushInfo();
+    if (sub && info && info.key !== cfg.public_key) {
+      await sub.unsubscribe(); // the build's key changed: start over
+      sub = null;
+    }
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlToBytes(cfg.public_key) });
+    }
+    await postToMailbox({ subscription: sub.toJSON(), yellow: [...yellowCalendars(current)], v: 1 });
+    storageSet(PUSH_KEY, JSON.stringify({ key: cfg.public_key, sentAt: Date.now() }));
+    return reg;
+  }
+
+  async function enablePush() {
+    if (isIOS() && !isStandalone()) {
+      alert("Op iPhone werken meldingen alleen vanuit de app op je beginscherm: tik op Delen → Zet op beginscherm, open Artevelde Tasks daar en tik dan opnieuw op Aanzetten.");
+      return;
+    }
+    if (!pushSupported()) {
+      alert("Deze browser ondersteunt geen meldingen. Gebruik Chrome op Android, of op iPhone de app op je beginscherm.");
+      return;
+    }
+    if (!current || !current.push) {
+      alert("Even geduld: de eerste update na deze nieuwe versie is nog bezig. Probeer het over enkele minuten opnieuw.");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      alert("Meldingen zijn geweigerd. Zet ze aan in de instellingen van je browser of gsm voor deze site.");
+      updatePushUi();
+      return;
+    }
+    try {
+      const reg = await subscribeThisPhone();
+      reg.showNotification("Meldingen staan aan ✓", {
+        body: "Je krijgt een melding bij elke grote taak (binnen 30 minuten na een update).",
+        icon: "icons/icon-192.png",
+      });
+    } catch (err) {
+      console.error(err);
+      alert("Aanzetten lukte niet. Controleer je verbinding en probeer opnieuw.");
+    }
+    updatePushUi();
+  }
+
+  async function disablePush() {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await postToMailbox({ unsubscribe: sub.endpoint, v: 1 }).catch(() => {});
+        await sub.unsubscribe();
+      }
+    } catch (e) { /* ignore */ }
+    storageSet(PUSH_KEY, null);
+    updatePushUi();
+  }
+
+  // Re-send the subscription now and then (and when yellow courses change), so the build
+  // always has it even if the mailbox forgot an older message.
+  async function refreshPushRegistration(force) {
+    const info = pushInfo();
+    if (!info || !pushSupported() || Notification.permission !== "granted" || !current || !current.push) return;
+    if (!force && info.key === current.push.public_key && Date.now() - info.sentAt < 24 * 3600 * 1000) return;
+    try {
+      await subscribeThisPhone();
+    } catch (e) { /* try again next time */ }
+  }
+
+  function updatePushUi() {
+    const on = Boolean(pushInfo()) && pushSupported() && Notification.permission === "granted";
+    const banner = $("push-banner");
+    let dismissed = false;
+    try {
+      dismissed = sessionStorage.getItem("artevelde-tasks-push-banner") === "hidden";
+    } catch (e) { /* ignore */ }
+    banner.hidden = on || dismissed || !(current && current.push);
+    $("push-toggle").textContent = on ? "Meldingen uitzetten" : "Meldingen aanzetten";
+    $("push-state").textContent = on
+      ? "✓ Meldingen staan aan op deze gsm."
+      : (isIOS() && !isStandalone() ? "Op iPhone: zet de app eerst op je beginscherm (Delen → Zet op beginscherm)." : "Meldingen staan uit.");
+  }
+
+  $("push-enable").addEventListener("click", enablePush);
+  $("push-toggle").addEventListener("click", () => (pushInfo() && Notification.permission === "granted" ? disablePush() : enablePush()));
+
   // ---- auto-update ------------------------------------------------------
 
   let reloadPending = false;
@@ -767,6 +889,8 @@
       checkAppVersion(data);
       safeRender(data);
       showStatus("", false);
+      updatePushUi();
+      refreshPushRegistration(false);
     } catch (err) {
       const cached = loadCache();
       if (cached) {

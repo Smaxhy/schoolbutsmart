@@ -67,13 +67,14 @@ def _header_value(value):
 
 class Notifier:
     def __init__(self, topic, state_file, dashboard_url="", server="https://ntfy.sh",
-                 notify_default_tier=True, session=None, only_big=False):
+                 notify_default_tier=True, session=None, only_big=False, push_sender=None):
         self.topic = topic
         self.state_file = state_file
         self.dashboard_url = dashboard_url
         self.server = server.rstrip("/")
         self.notify_default_tier = notify_default_tier
         self.only_big = only_big
+        self.push_sender = push_sender  # Web Push to phones (push.PushSender), optional
         self.session = session or requests.Session()
         self._lock = threading.Lock()
 
@@ -127,18 +128,24 @@ class Notifier:
         }
         if self.dashboard_url:
             headers["Click"] = self.dashboard_url
-        try:
-            resp = self.session.post(
-                f"{self.server}/{self.topic}",
-                data="\n".join(parts).encode("utf-8"),
-                headers=headers,
-                timeout=15,
-            )
-            resp.raise_for_status()
-            return True
-        except requests.RequestException as exc:
-            log.warning("ntfy notification failed: %s", type(exc).__name__)
-            return False
+
+        delivered = False
+        if self.push_sender:
+            delivered = self.push_sender(f"{prefix}: {task['title']}", "\n".join(parts),
+                                         url=self.dashboard_url, tag=task.get("uid", "")) or delivered
+        if self.topic:
+            try:
+                resp = self.session.post(
+                    f"{self.server}/{self.topic}",
+                    data="\n".join(parts).encode("utf-8"),
+                    headers=headers,
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                delivered = True
+            except requests.RequestException as exc:
+                log.warning("ntfy notification failed: %s", type(exc).__name__)
+        return delivered
 
     def notify_new_tiers(self, tasks):
         """Notify once per task each time it enters a higher urgency tier.
@@ -146,8 +153,8 @@ class Notifier:
         `tasks` should already be filtered to the lookahead window. Returns the
         number of notifications sent.
         """
-        if not self.topic:
-            log.info("NTFY_TOPIC not set, skipping notifications")
+        if not self.topic and not self.push_sender:
+            log.info("No phone subscribed and no NTFY_TOPIC: skipping notifications")
             return 0
 
         if self.only_big:

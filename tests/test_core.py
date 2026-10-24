@@ -266,7 +266,17 @@ class ColorTests(unittest.TestCase):
         self.assertEqual(short_course("PBAGDM - STORY1 - Semester 1"), "STORY1")
 
 
+def _offline_mailbox():
+    import requests
+    return mock.patch("push.requests.get", side_effect=requests.ConnectionError())
+
+
 class BuildTests(unittest.TestCase):
+    def setUp(self):
+        self._mailbox = _offline_mailbox()
+        self._mailbox.start()
+        self.addCleanup(self._mailbox.stop)
+
     def test_build_site(self):
         import build_site
         with tempfile.TemporaryDirectory() as tmp, \
@@ -390,6 +400,9 @@ class AiHelperTests(unittest.TestCase):
 
 class BigNotificationTests(unittest.TestCase):
     def setUp(self):
+        self._mailbox = _offline_mailbox()
+        self._mailbox.start()
+        self.addCleanup(self._mailbox.stop)
         self.dir = tempfile.TemporaryDirectory()
         self.session = mock.Mock()
         self.notifier = Notifier("topic", os.path.join(self.dir.name, "state.json"),
@@ -441,3 +454,92 @@ def base64_title(value):
     if value.startswith("=?UTF-8?B?"):
         return base64.b64decode(value[10:-2]).decode("utf-8")
     return value
+
+
+class WebPushTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.store = os.path.join(self.dir.name, "push.json")
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def subscriber(self):
+        """A fake phone: its own P-256 key pair and auth secret, like a browser push subscription."""
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        import push
+        key = ec.generate_private_key(ec.SECP256R1())
+        pub = key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+        auth = os.urandom(16)
+        sub = {"endpoint": "https://push.example/send/abc", "keys": {"p256dh": push._b64url(pub), "auth": push._b64url(auth)}}
+        return key, auth, sub
+
+    def test_keys_are_stable_and_secret_dependent(self):
+        import push
+        _, a = push.vapid_keys("https://canvas.example/feeds/calendars/user_secret.ics")
+        _, b = push.vapid_keys("https://canvas.example/feeds/calendars/user_secret.ics")
+        _, c = push.vapid_keys("https://canvas.example/feeds/calendars/user_other.ics")
+        self.assertEqual(a, b)
+        self.assertNotEqual(a, c)
+        self.assertEqual(len(a), 87)  # 65-byte uncompressed point, base64url without padding
+        self.assertTrue(push.mailbox_topic("x").startswith("artevelde-push-"))
+
+    def test_collect_from_mailbox(self):
+        import push
+        _, _, sub = self.subscriber()
+        lines = [
+            json.dumps({"event": "open"}),
+            json.dumps({"event": "message", "time": 10, "message": json.dumps({"subscription": sub, "yellow": ["course_1"]})}),
+            json.dumps({"event": "message", "time": 11, "message": "not json"}),
+            json.dumps({"event": "message", "time": 12, "message": json.dumps({"subscription": {"endpoint": "http://bad"}})}),
+        ]
+        session = mock.Mock()
+        session.get.return_value.text = "\n".join(lines)
+        store = push.collect("topic", self.store, session=session)
+        self.assertEqual(list(store), [sub["endpoint"]])
+        self.assertEqual(push.yellow_from_phones(store), {"course_1"})
+        session.get.return_value.text = json.dumps({"event": "message", "time": 20,
+                                                    "message": json.dumps({"unsubscribe": sub["endpoint"]})})
+        self.assertEqual(push.collect("topic", self.store, session=session), {})
+
+    def test_real_encryption_and_vapid_signature(self):
+        """Send through pywebpush, then decrypt and verify like a push service + phone would."""
+        import base64
+        import http_ece
+        import jwt
+        import push
+        phone_key, auth, sub = self.subscriber()
+        vapid, public_key = push.vapid_keys("https://canvas.example/feeds/calendars/user_secret.ics")
+        store = {sub["endpoint"]: {"subscription": sub, "yellow": [], "time": 1}}
+        captured = {}
+
+        def fake_post(url, data=None, headers=None, timeout=None, **kw):
+            captured.update(url=url, data=data, headers=headers)
+            return mock.Mock(status_code=201, ok=True, text="")
+
+        sender = push.PushSender(store, self.store, vapid, "mailto:artevelde-tasks@users.noreply.github.com")
+        with mock.patch("requests.post", side_effect=fake_post):
+            self.assertTrue(sender("★ Nieuwe grote taak: Tussentijdse opdracht", "MOT1\nDeadline zo 18 okt", url="https://x/"))
+        plain = http_ece.decrypt(captured["data"], private_key=phone_key, auth_secret=auth, version="aes128gcm")
+        self.assertEqual(json.loads(plain)["title"], "★ Nieuwe grote taak: Tussentijdse opdracht")
+        # VAPID: "vapid t=<jwt>, k=<public key>" signed with the derived key
+        auth_header = captured["headers"]["Authorization"]
+        token = auth_header.split("t=")[1].split(",")[0]
+        k = auth_header.split("k=")[1]
+        self.assertEqual(k, public_key)
+        from cryptography.hazmat.primitives.asymmetric import ec
+        pub = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), base64.urlsafe_b64decode(k + "=="))
+        claims = jwt.decode(token, pub, algorithms=["ES256"], audience="https://push.example")
+        self.assertEqual(claims["sub"], "mailto:artevelde-tasks@users.noreply.github.com")
+
+    def test_gone_subscription_is_removed(self):
+        import push
+        from pywebpush import WebPushException
+        _, _, sub = self.subscriber()
+        vapid, _ = push.vapid_keys("s")
+        store = {sub["endpoint"]: {"subscription": sub, "yellow": [], "time": 1}}
+        sender = push.PushSender(store, self.store, vapid, "mailto:a@b.c")
+        with mock.patch("push.webpush", side_effect=WebPushException("gone", response=mock.Mock(status_code=410))):
+            self.assertFalse(sender("t", "b"))
+        self.assertEqual(store, {})
