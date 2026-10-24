@@ -19,6 +19,9 @@ URGENCY_RANK = {"default": 0, "high": 1, "urgent": 2}
 NTFY_PRIORITY = {"urgent": 5, "high": 4, "default": 3}
 NTFY_TAGS = {"urgent": "rotating_light", "high": "warning", "default": "calendar"}
 TITLE_PREFIX = {"urgent": "Dringend", "high": "Binnenkort", "default": "Nieuw"}
+# Big tasks: one push when one appears, one when it's a week away, one two days before.
+BIG_TITLE_PREFIX = {"urgent": "★ Grote taak: bijna deadline", "high": "★ Grote taak: nog een week",
+                    "default": "★ Nieuwe grote taak"}
 
 _WEEKDAYS = ["ma", "di", "wo", "do", "vr", "za", "zo"]
 _MONTHS = ["jan", "feb", "mrt", "apr", "mei", "jun",
@@ -64,12 +67,13 @@ def _header_value(value):
 
 class Notifier:
     def __init__(self, topic, state_file, dashboard_url="", server="https://ntfy.sh",
-                 notify_default_tier=True, session=None):
+                 notify_default_tier=True, session=None, only_big=False):
         self.topic = topic
         self.state_file = state_file
         self.dashboard_url = dashboard_url
         self.server = server.rstrip("/")
         self.notify_default_tier = notify_default_tier
+        self.only_big = only_big
         self.session = session or requests.Session()
         self._lock = threading.Lock()
 
@@ -106,14 +110,20 @@ class Notifier:
     def send(self, task):
         """POST one task to ntfy.sh. Returns True on success."""
         tier = task["urgency"]
+        big = bool(task.get("big"))
         parts = [f"Deadline {format_due_nl(datetime.fromisoformat(task['due_date']))}"
                  f" ({countdown_nl(task['days_until_due'])})"]
-        if task.get("course"):
-            parts.insert(0, task["course"])
+        course = task.get("course_short") or task.get("course")
+        if course:
+            parts.insert(0, course)
+        if big and task.get("big_reasons"):
+            reason = task["big_reasons"][0]
+            parts.append(reason["text"] if isinstance(reason, dict) else str(reason))
+        prefix = (BIG_TITLE_PREFIX if big else TITLE_PREFIX)[tier]
         headers = {
-            "Title": _header_value(f"{TITLE_PREFIX[tier]}: {task['title']}"),
+            "Title": _header_value(f"{prefix}: {task['title']}"),
             "Priority": str(NTFY_PRIORITY[tier]),
-            "Tags": NTFY_TAGS[tier],
+            "Tags": ("star," if big else "") + NTFY_TAGS[tier],
         }
         if self.dashboard_url:
             headers["Click"] = self.dashboard_url
@@ -139,6 +149,9 @@ class Notifier:
         if not self.topic:
             log.info("NTFY_TOPIC not set, skipping notifications")
             return 0
+
+        if self.only_big:
+            tasks = [t for t in tasks if t.get("big")]
 
         sent = 0
         with self._lock:

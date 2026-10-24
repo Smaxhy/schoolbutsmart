@@ -23,18 +23,16 @@ A small app that runs entirely on GitHub (Actions + Pages) and reads your assign
 
 > Treat this URL like a password: anyone who has it can read your calendar. Never commit it (`.env` is git-ignored).
 
-## (Optional) install ntfy on your phone
+## 📲 Push notification for big tasks (ntfy)
 
-Skip this if you don't want push notifications; just leave `NTFY_TOPIC` unset.
+You get a push on your phone for every **big task** (★ Grote taken): when it first shows up, when it's a week away, and two days before the deadline. Tapping it opens the dashboard.
 
+1. Install the free **ntfy** app: [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy) / [iOS](https://apps.apple.com/app/ntfy/id1625396347).
+2. In the app tap **+** and subscribe to a long, random topic name (anyone who knows it can read it), keep server `ntfy.sh`.
+3. Add that same name as repo secret **`NTFY_TOPIC`**.
+4. Tell GitHub which courses are yellow in your Canvas calendar: repo **variable** `BIG_COURSES`, e.g. `MOT1` or `MOT1, STORY1` (short course names as shown in the app). Exams and *tussentijdse* tasks count as big anyway.
 
-1. Install the **ntfy** app:
-   - Android: [Google Play](https://play.google.com/store/apps/details?id=io.heckel.ntfy) or [F-Droid](https://f-droid.org/packages/io.heckel.ntfy/)
-   - iOS: [App Store](https://apps.apple.com/app/ntfy/id1625396347)
-2. Open it, tap **+**, and subscribe to the topic you set as `NTFY_TOPIC` (keep the default server `ntfy.sh`).
-3. Test it: `curl -d "hello" ntfy.sh/<your-topic>`
-
-Topics on ntfy.sh have no password, so pick a long, unguessable name (e.g. `artevelde-tasks-8f3k2x9q`).
+Want a push for every task instead? Set variable `NOTIFY_ONLY_BIG` to `false`.
 
 ## Deploy on GitHub (Actions + Pages)
 
@@ -130,6 +128,8 @@ Run the tests with `python -m unittest discover -s tests -t .`.
 | `NTFY_TOPIC` | – | ntfy topic (optional); notifications are skipped if empty |
 | `LOOKAHEAD_DAYS` | `14` | How many days ahead to show and notify |
 | `TIMEZONE` | `Europe/Brussels` | Timezone for due dates |
+| `NOTIFY_ONLY_BIG` | `true` | Only push big tasks (new, one week before, two days before) |
+| `BIG_COURSES` | – | Your yellow courses for notifications, e.g. `MOT1, STORY1` |
 | `NOTIFY_DEFAULT_TIER` | `true` | Also notify for green (>7 days) tasks |
 | `ANTHROPIC_API_KEY` | – | Claude API key; the build has Claude Haiku make every new task |
 | `CANVAS_TOKEN` | – | Optional Canvas access token, only used to read your course colours (auto-detect yellow) |
