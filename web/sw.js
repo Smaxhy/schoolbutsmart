@@ -1,6 +1,6 @@
 // Network first for everything, so a new deploy shows up on the next load;
 // the cache is only a fallback for when the phone is offline.
-const CACHE = "artevelde-tasks-v6";
+const CACHE = "artevelde-tasks-v7";
 const SHELL = [
   "./",
   "css/style.css",
@@ -46,5 +46,35 @@ self.addEventListener("fetch", (event) => {
         return resp;
       })
       .catch(() => caches.match(key, { ignoreSearch: true }).then((cached) => cached || Response.error()))
+  );
+});
+
+// ---- Web Push: notifications for big tasks, sent by the GitHub build -------------------
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (e) {
+    data = { title: "Artevelde Tasks", body: event.data ? event.data.text() : "" };
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || "Artevelde Tasks", {
+      body: data.body || "",
+      icon: "icons/icon-192.png",
+      badge: "icons/icon-192.png",
+      tag: data.tag || undefined,
+      data: { url: data.url || self.registration.scope },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || self.registration.scope;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+      const open = wins.find((w) => w.url.startsWith(self.registration.scope));
+      return open ? open.focus() : self.clients.openWindow(url);
+    })
   );
 });

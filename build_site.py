@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from canvas_client import CanvasClient, FeedError, fetch_course_colors, is_yellow
 from notifier import HIGH_DAYS, URGENT_DAYS, Notifier, filter_upcoming
 from ai_helper import SYSTEM_PROMPT, add_help
+import push
 from weights import classify, load_weights
 
 log = logging.getLogger("build_site")
@@ -96,6 +97,12 @@ def build(out_dir, web_dir, state_file, notify=True, weights_file=None, ai_cache
             names = {t["calendar"].lower(), (t.get("course_short") or "").lower(), (t.get("course") or "").lower()}
             if t["calendar"] and names & wanted:
                 yellow.add(t["calendar"])
+    # Phones that turned on notifications in the app (Web Push), and the courses they marked yellow.
+    state_dir = os.path.dirname(state_file) or "."
+    push_sender, push_key, push_topic, phone_yellow = push.setup(
+        feed_url, os.path.join(state_dir, "push.json"),
+        contact="mailto:artevelde-tasks@users.noreply.github.com")
+    yellow |= phone_yellow
     log.info("Canvas colours: %d known, yellow calendars: %s", len(colors), sorted(yellow) or "none")
 
     weights = load_weights(weights_file or "")
@@ -121,6 +128,7 @@ def build(out_dir, web_dir, state_file, notify=True, weights_file=None, ai_cache
             server=os.environ.get("NTFY_SERVER") or "https://ntfy.sh",
             notify_default_tier=_bool_env("NOTIFY_DEFAULT_TIER", True),
             only_big=_bool_env("NOTIFY_ONLY_BIG", True),
+            push_sender=push_sender,
         )
         sent = notifier.notify_new_tiers(tasks)
 
@@ -149,6 +157,7 @@ def build(out_dir, web_dir, state_file, notify=True, weights_file=None, ai_cache
                       for c in calendar_summary(all_tasks) if c["id"]],
         "colors_known": bool(colors),
         "ai_system_prompt": SYSTEM_PROMPT,
+        "push": {"public_key": push_key, "topic": push_topic, "mailbox": push.MAILBOX_SERVER},
     }
     with open(os.path.join(out_dir, "tasks.json"), "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)

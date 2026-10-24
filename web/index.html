@@ -41,6 +41,11 @@
   <div class="wrap">
     <div id="status" class="status" role="status" hidden></div>
 
+    <div id="push-banner" class="push-banner" hidden>
+      <span>🔔 Krijg een melding op je gsm bij elke grote taak</span>
+      <button id="push-enable" class="btn primary" type="button">Aanzetten</button>
+    </div>
+
     <section class="stats" aria-label="Overzicht">
       <div class="stat urgent"><span id="stat-urgent" class="stat-num">–</span><span class="stat-label">Binnen 2 dagen</span></div>
       <div class="stat week"><span id="stat-week" class="stat-num">–</span><span class="stat-label">Deze week</span></div>
@@ -65,6 +70,11 @@
         <h2 id="settings-title">Instellingen</h2>
         <button id="settings-close" class="icon-btn close" type="button" aria-label="Sluiten">×</button>
       </div>
+      <h3>Meldingen</h3>
+      <p class="muted">Een melding op deze gsm als er een grote taak bijkomt, een week op voorhand en twee dagen voor de deadline.</p>
+      <p id="push-state" class="small"></p>
+      <div class="row"><button id="push-toggle" class="btn primary" type="button">Meldingen aanzetten</button></div>
+
       <h3>Grote taken</h3>
       <p class="muted">Vink de vakken aan die <strong>geel</strong> zijn in je Canvas-kalender. Alles van die vakken komt bij ★ Grote taken, samen met examens en tussentijdse opdrachten.</p>
       <p id="picker-auto" class="small auto-note" hidden>Automatisch ingevuld met je kleuren uit Canvas.</p>

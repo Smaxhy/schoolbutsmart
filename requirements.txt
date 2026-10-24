@@ -3,3 +3,4 @@ requests>=2.31,<3
 python-dotenv>=1.0,<2
 tzdata
 anthropic>=1.10,<2
+pywebpush>=2.0,<3

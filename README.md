@@ -23,16 +23,16 @@ A small app that runs entirely on GitHub (Actions + Pages) and reads your assign
 
 > Treat this URL like a password: anyone who has it can read your calendar. Never commit it (`.env` is git-ignored).
 
-## 📲 Push notification for big tasks (ntfy)
+## 🔔 Notifications for big tasks
 
-You get a push on your phone for every **big task** (★ Grote taken): when it first shows up, when it's a week away, and two days before the deadline. Tapping it opens the dashboard.
+Open the site on your phone and tap **Aanzetten** on the 🔔 banner (or ⚙️ → Meldingen). That's it: a normal phone notification for every **big task** when it appears, a week before and two days before the deadline. Tapping it opens the dashboard.
 
-1. Install the free **ntfy** app: [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy) / [iOS](https://apps.apple.com/app/ntfy/id1625396347).
-2. In the app tap **+** and subscribe to a long, random topic name (anyone who knows it can read it), keep server `ntfy.sh`.
-3. Add that same name as repo secret **`NTFY_TOPIC`**.
-4. Tell GitHub which courses are yellow in your Canvas calendar: repo **variable** `BIG_COURSES`, e.g. `MOT1` or `MOT1, STORY1` (short course names as shown in the app). Exams and *tussentijdse* tasks count as big anyway.
+- **Android:** works in Chrome straight away.
+- **iPhone (iOS 16.4+):** first add the site to your home screen (Share → *Add to Home Screen*), open it from there, then tap Aanzetten.
 
-Want a push for every task instead? Set variable `NOTIFY_ONLY_BIG` to `false`.
+How it works without a server: the phone's push subscription (plus the courses you ticked as yellow) is posted to a private-named ntfy.sh topic that acts as a mailbox; every GitHub run collects it into `push.json` on the `state` branch and sends Web Push messages with keys derived from your secret feed URL (`push.py`). No extra secrets or apps needed.
+
+Optional extras: `BIG_COURSES` (repo variable, e.g. `MOT1`) to mark yellow courses from GitHub, `NOTIFY_ONLY_BIG=false` for a notification for every task, and `NTFY_TOPIC` if you'd rather receive them in the ntfy app.
 
 ## Deploy on GitHub (Actions + Pages)
 

@@ -301,6 +301,22 @@ input[type="password"], input[type="text"] {
   font: inherit;
 }
 
+/* push banner */
+.push-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--big-bg);
+  color: #e4dbff;
+  font-size: .9rem;
+}
+.push-banner .btn { flex: none; min-height: 38px; padding: 6px 14px; }
+.push-banner[hidden] { display: none; }
+
 /* calendar picker */
 .cal-list { display: flex; flex-direction: column; gap: 6px; }
 .cal-row {
